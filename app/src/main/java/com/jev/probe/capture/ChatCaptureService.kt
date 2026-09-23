@@ -127,7 +127,13 @@ open class ChatCaptureService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
-        if (!prefs.enabled) { main.post { overlay?.hide() }; return }
+        // Paused: keep a small bubble so it can be resumed from the chat itself
+        // (see OverlayController.showPaused). Hiding it outright would make the
+        // in-chat pause button a one-way trip back to the app.
+        if (!prefs.enabled) {
+            main.post { if (overlay?.isShowing() != true) overlay?.showPaused() }
+            return
+        }
 
         val type = event.eventType
         // Decide "did we leave the chat app" from the REAL active window, not the
@@ -610,6 +616,20 @@ open class ChatCaptureService : AccessibilityService() {
     }
 
     override fun onInterrupt() {}
+
+    /**
+     * Rebuild the overlay when the system light/dark setting changes.
+     *
+     * An AccessibilityService is long-lived across configuration changes (it is
+     * not recreated like an Activity), and the overlay is a separate window that
+     * does not inherit the activity theme — so without this the panel would keep
+     * its old colours until the process restarted, leaving dark text on a dark
+     * panel after a switch.
+     */
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        main.post { runCatching { overlay?.onConfigurationChanged() } }
+    }
 
     override fun onDestroy() {
         super.onDestroy()

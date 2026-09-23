@@ -44,88 +44,25 @@ class ReplyClient(private val prefs: Prefs) {
             }
             "$who：${m.text}"
         }
-        // The exact output shape is spelled out because this prompt runs on
-        // small fast models that otherwise invent their own (observed live:
-        // [{content,strategy}] objects, unquoted braces, full-width quotes).
-        // Stating "array of strings" alone was not enough. extractReplies still
-        // repairs whatever comes back — this just makes the good case common.
-        val sys = buildString {
-            // Identity first, and it is a PERSON, not an assistant. This single
-            // change came from studying NeoBot (github.com/SuperQuail/NeoBot),
-            // whose replies are reportedly indistinguishable from a human's.
-            // Its system prompt opens with "<你是谁>你的名字是{bot_name}…" — a
-            // named individual with a personality — where this one used to open
-            // with "你是中文即时通讯回复助手" (you are an assistant). A live A/B
-            // on the user's own awkward screenshot scene: the persona framing
-            // produced replies with tidiness 4 vs 26 for the assistant framing
-            // (tidiness = length spread + count of tidily-punctuated endings),
-            // i.e. the assistant framing kept emitting three suspiciously
-            // uniform lines. Both averaged ~7.5 characters, so length was never
-            // the real problem — being an assistant was.
-            append("你是谁：你就是一个普通人在用手机聊天，有个性、说话随意，不是助手，不是 AI。")
-            append("不要提到自己是程序、模型或助手，也不要解释或总结。")
-            append("只输出一个 JSON 数组，数组里只能有 3 个字符串元素，")
-            append("不要对象、不要键名、不要 strategy 之类的字段，就是 3 条纯文本。")
-            append("格式必须严格是：[\"第一条\",\"第二条\",\"第三条\"]。")
-            if (group) {
-                // Group chats have different etiquette: a reply that works in a
-                // 1:1 ("我错了" / 长篇承诺) reads as bizarre in a group, which is
-                // exactly the "莫名其妙" the user reported.
-                append("这是一个多人群聊，房间名「${snapshot.title.orEmpty()}」。")
-                append("群聊要短、要接得住梗、不要煽情、不要长篇大论、不要像客服。")
-                append("不要用「亲爱的」「宝贝」这类一对一才合适的称呼，除非群里有人先这样叫你。")
-                append("不要在群里表白、道歉过度或说只有两个人之间才能说的话。")
-                val to = target?.takeIf { it.isNotBlank() }
-                if (to != null) {
-                    append("这 3 条都是回复给「$to」的：既要对上 $to 刚说的话，")
-                    append("也要接住群里正在聊的话题；在群里可以点名（@$to）也可以不点名，选自然的。")
-                } else {
-                    append("这 3 条都是接着群里正在聊的话题说的，不要只针对最后一句。")
-                }
-            }
-            // The anti-assistant rules below are the measured fix for "AI 味太浓、
-            // 非常尴尬". Live A/Bs showed the problem was never the vocabulary
-            // (both prompts used zero banned words) — it was REGISTER and
-            // LENGTH together: the original prompt averaged 19-21 characters and
-            // read like a written sentence. So: a hard cap, explicit permission
-            // to be fragmentary, and a named ban on the assistant register.
-            //
-            // "不要回复的太有条理" and the 错误->正确 examples are lifted from
-            // NeoBot's <回复要求>, because they target the specific failure my
-            // rules alone did not fix: three replies that are all equally tidy.
-            append("回复要求：请注意把握聊天内容，不要回复的太有条理，可以有个性。")
-            // The context rule is the fix for "回复非常无厘头 / 只根据最后一条消息":
-            // the transcript above IS the conversation, and a reply must fit it.
-            // Two earlier lines worked against that (see the removed 简短低姿态
-            // strategy framing and the old single-line window), so the
-            // requirement is now stated outright rather than implied.
-            append("最重要：必须读懂上面整段对话在聊什么，回复要接得上这个上下文，")
-            append("不要只针对最后一句、也不要答非所问。")
-            append("先在心里弄清「我们在聊什么、上一句是什么意思」，再决定怎么接；")
-            append("如果最新一句是省略句、反问或梗，要结合前文才能正确理解。")
-            append("每条不超过 20 个字，真人打字就是这么短；请平淡一些、简短一些，")
-            append("不要刻意突出你懂什么，尽量不要说你说过的话。")
-            append("可以有语气词（啊 吧 呢 嘛 哈哈）、可以省主语、可以重复词，像随手打的；")
-            append("不要输出多余内容：不要前后缀、不要冒号、不要给整句加引号、不要括号、")
-            append("不要表情包、不要 @ 任何人。")
-            append("严禁这些词：建议 可以 应该 记住 务必 亲 您好 感谢 加油 相信 一起努力 抱歉 不好意思 麻烦 首先 总之 因此；")
-            append("严禁说教、严禁安慰式总结、严禁给行动方案或承诺、严禁客服腔、严禁排比和成语；")
-            append("严格禁止用（）描述你的动作、表情或心理（比如「（笑）」「（叹气）」「（挠头）」）。")
-            append("三条要有区别，但都必须是「随手打出来的一句话」：")
-            append("一条顺着对方情绪说，一条自嘲或认怂，一条只回几个字（比如「行」「哈哈哈」）。")
-            append("三条不要用同一个开头，不要每条都以标点结尾，长度也别都差不多。")
-            append("错误示例：\"确实，这确实挺尴尬的。\"（太整齐、像总结）")
-            append("错误示例：\"（笑）我也觉得\"（不许用括号描述动作）")
-            append("正确示例：\"哈哈哈确实\" / \"我服了\" / \"行\"")
-            append("不要解释，不要 markdown 代码块，不要引号以外的任何内容，直接输出那个 JSON 数组。")
-        }
+        // The persona, the anti-assistant rules and the worked examples all live
+        // in PromptLibrary, which documents the evidence behind each rule. The
+        // built-in text is always sent; a user's own prompt (if they wrote one)
+        // is appended AFTER it, so a single line of custom text cannot override
+        // the register.
+        val sys = PromptLibrary.compose(
+            userPrompt = prefs.userPrompt,
+            groupRules = if (group) PromptLibrary.groupRules(snapshot.title.orEmpty(), target) else null
+        )
         val user = knowledgeBlock(relationship, ctx) +
             if (group) groupUserBlock(snapshot, relationship, convo, target)
             else "关系：$relationship\n\n" +
                 "完整对话（越靠下越新，共 ${window.size} 条，请通读后再回）：\n$convo\n\n" +
                 "先判断这段对话在聊什么，再给出 3 条候选回复。"
 
-        val first = extractReplies(chat(sys, user, temperature = 0.8))
+        // Temperature ~0.95: the human-like end of the usual range. Below that
+        // the three candidates converge on one phrasing; far above it the model
+        // starts drifting off the conversation.
+        val first = extractReplies(chat(sys, user, temperature = 0.95))
         if (first.size >= 3) return first.take(3)
 
         // One retry with a blunter instruction and a lower temperature. The
@@ -134,7 +71,7 @@ class ReplyClient(private val prefs: Prefs) {
         // list with filler, which is what used to reach the panel as a bogus
         // top-ranked suggestion.
         val retrySys = sys + "重要：必须严格输出 3 条。上一轮你的输出格式不合法，这次只输出方括号和引号，不要任何其他字符。"
-        val second = extractReplies(chat(retrySys, user, temperature = 0.3))
+        val second = extractReplies(chat(retrySys, user, temperature = 0.4))
         val merged = LinkedHashSet<String>()
         merged.addAll(first)
         merged.addAll(second)
@@ -213,6 +150,13 @@ class ReplyClient(private val prefs: Prefs) {
             .put("model", prefs.replyModel)
             .put("messages", messages)
             .put("temperature", temperature)
+            // Mild anti-repetition. Three candidates are generated in one call,
+            // and without this the model tends to emit the same sentence three
+            // ways ("确实尬" / "确实尬了" / "确实挺尬"), which reads as machine
+            // output. These are the gentle end of the usual range: enough to
+            // break the echo, not enough to start inventing facts.
+            .put("frequency_penalty", 0.3)
+            .put("presence_penalty", 0.2)
         applyThinking(body, prefs.replyThinking)
         val resp = HttpJson.post(url, prefs.effectiveReplyKey(), body, Route.REPLY, HttpJson.headersFor(url))
         return resp.optJSONArray("choices")?.optJSONObject(0)

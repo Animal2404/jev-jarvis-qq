@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Dark values, applied automatically when the system is in night mode.
+
+  Keep in sync with Palette.kt's night branches (Palette is what the code-built
+  views read).
+-->
+<resources>
+    <color name="window_bg">#121212</color>
+    <color name="card_bg">#1E1E1E</color>
+    <color name="ink">#E8EAED</color>
+    <color name="accent">#7AA2FF</color>
+</resources>

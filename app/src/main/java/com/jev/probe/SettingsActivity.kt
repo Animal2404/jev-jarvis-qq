@@ -41,10 +41,10 @@ class SettingsActivity : AppCompatActivity() {
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
 
-    private val accent = Color.parseColor("#3A7AFE")
-    private val ink = Color.parseColor("#111827")
-    private val sub = Color.parseColor("#6B7280")
-    private val pillOff = Color.parseColor("#EEF1F5")
+    private val accent get() = Palette.accent(this)
+    private val ink get() = Palette.ink(this)
+    private val sub get() = Palette.sub(this)
+    private val pillOff get() = Palette.pillOff(this)
 
     /** Selected provider index per card, held so Save can read it back. */
     private var judgeProviderIdx = 0
@@ -57,7 +57,7 @@ class SettingsActivity : AppCompatActivity() {
         prefs = Prefs(this)
         Log.i(TAG, "settings opened judgeKey.len=${prefs.judgeKey.length}" +
             " replyKey.len=${prefs.replyKey.length} visionKey.len=${prefs.visionKey.length}")
-        window.decorView.setBackgroundColor(Color.parseColor("#F2F3F5"))
+        window.decorView.setBackgroundColor(Palette.bg(this))
 
         val scroll = ScrollView(this)
         val root = LinearLayout(this).apply {
@@ -381,6 +381,19 @@ class SettingsActivity : AppCompatActivity() {
         card2.addView(text("判断比回复需要更多上下文（意图取决于话题怎么走到这里），默认 ${Prefs.DEFAULT_JUDGE_WINDOW}。",
             11f, sub))
 
+        // --- 附加提示词 ---
+        // The built-in prompt is always sent and is designed to work alone; this
+        // only refines it, and is appended AFTER the built-in text so a single
+        // line here cannot override the persona.
+        card2.addView(label("附加提示词（可留空）"))
+        userPromptEdit = edit(prefs.userPrompt, "留空即可；只填想额外补充的要求").apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            minLines = 2
+        }
+        card2.addView(userPromptEdit)
+        card2.addView(text("内置提示词已经默认生效（让人味、短、只说人话）。这里写的内容会拼在内置提示词后面。" +
+            "比如「叫我老王」「别用哈哈」。", 11f, sub))
+
         // --- OCR 兜底（B 阶段）---
         ocrFallbackRow = toggleRow("树读不到正文时用 OCR 兜底", prefs.ocrFallback)
         card2.addView(ocrFallbackRow)
@@ -559,6 +572,7 @@ class SettingsActivity : AppCompatActivity() {
             ?.coerceIn(Prefs.MIN_WINDOW, Prefs.MAX_WINDOW) ?: prefs.replyWindow
         prefs.judgeWindow = judgeWindowEdit?.text?.toString()?.trim()?.toIntOrNull()
             ?.coerceIn(Prefs.MIN_WINDOW, Prefs.MAX_WINDOW) ?: prefs.judgeWindow
+        prefs.userPrompt = userPromptEdit?.text?.toString() ?: prefs.userPrompt
         prefs.groupMode = (groupRow?.tag as? Boolean) ?: true
         prefs.groupTarget = groupTargetEdit?.text?.toString()?.trim() ?: ""
     }
@@ -581,6 +595,7 @@ class SettingsActivity : AppCompatActivity() {
     private var seek: SeekBar? = null
     private var replyWindowEdit: EditText? = null
     private var judgeWindowEdit: EditText? = null
+    private var userPromptEdit: EditText? = null
     private var groupRow: LinearLayout? = null
     private var groupTargetEdit: EditText? = null
 
@@ -792,7 +807,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun paintPill(v: TextView, on: Boolean) {
-        v.setTextColor(if (on) Color.WHITE else sub)
+        v.setTextColor(if (on) Palette.onAccent(this) else sub)
         v.setTypeface(v.typeface, if (on) Typeface.BOLD else Typeface.NORMAL)
         v.background = round(dp(9), if (on) accent else pillOff)
     }
@@ -808,15 +823,15 @@ class SettingsActivity : AppCompatActivity() {
         val sw = TextView(this).apply {
             text = if (initial) "开" else "关"; textSize = 13f; gravity = Gravity.CENTER
             setTypeface(typeface, Typeface.BOLD)
-            setTextColor(if (initial) Color.WHITE else sub)
-            background = round(dp(10), if (initial) accent else Color.parseColor("#E5E7EB"))
+            setTextColor(if (initial) Palette.onAccent(this) else sub)
+            background = round(dp(10), if (initial) accent else Palette.pillOff(this))
             setPadding(dp(18), dp(6), dp(18), dp(6))
         }
         sw.setOnClickListener {
             val now = !((row.tag as? Boolean) ?: true); row.tag = now
             sw.text = if (now) "开" else "关"
-            sw.setTextColor(if (now) Color.WHITE else sub)
-            sw.background = round(dp(10), if (now) accent else Color.parseColor("#E5E7EB"))
+            sw.setTextColor(if (now) Palette.onAccent(this) else sub)
+            sw.background = round(dp(10), if (now) accent else Palette.pillOff(this))
         }
         row.addView(lab); row.addView(sw)
         return row
@@ -831,7 +846,7 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun card() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        background = round(dp(14), Color.WHITE)
+        background = round(dp(14), Palette.card(this))
         setPadding(dp(14), dp(4), dp(14), dp(14))
         layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -840,8 +855,8 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun edit(value: String, hint: String, password: Boolean = false) = EditText(this).apply {
         setText(value); this.hint = hint; textSize = 14f; setTextColor(ink)
-        setHintTextColor(Color.parseColor("#9CA3AF"))
-        background = round(dp(8), Color.parseColor("#F3F4F6"))
+        setHintTextColor(Palette.hint(this))
+        background = round(dp(8), Palette.field(this))
         setPadding(dp(10), dp(10), dp(10), dp(10))
         // Masked, not VISIBLE_PASSWORD: an API key should not sit in plain sight.
         if (password) inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
@@ -855,7 +870,7 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun primaryBtn(label: String, onClick: () -> Unit) = TextView(this).apply {
         text = label; textSize = 15f; gravity = Gravity.CENTER; setTypeface(typeface, Typeface.BOLD)
-        setTextColor(Color.WHITE); background = round(dp(12), accent)
+        setTextColor(Palette.onAccent(this)); background = round(dp(12), accent)
         setPadding(dp(16), dp(13), dp(16), dp(13))
         layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(18) }
@@ -865,7 +880,7 @@ class SettingsActivity : AppCompatActivity() {
     /** Outlined button sized for inside a card. */
     private fun cardBtn(label: String, onClick: () -> Unit) = TextView(this).apply {
         text = label; textSize = 14f; gravity = Gravity.CENTER; setTypeface(typeface, Typeface.BOLD)
-        setTextColor(accent); background = round(dp(10), Color.WHITE, stroke = true)
+        setTextColor(accent); background = round(dp(10), Palette.card(this), stroke = true)
         setPadding(dp(14), dp(10), dp(14), dp(10))
         layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(14) }
@@ -875,7 +890,7 @@ class SettingsActivity : AppCompatActivity() {
     /** Small outlined button that sits inline, under the field it acts on. */
     private fun rowBtn(label: String, onClick: () -> Unit) = TextView(this).apply {
         text = label; textSize = 13f; gravity = Gravity.CENTER; setTypeface(typeface, Typeface.BOLD)
-        setTextColor(accent); background = round(dp(9), Color.WHITE, stroke = true)
+        setTextColor(accent); background = round(dp(9), Palette.card(this), stroke = true)
         setPadding(dp(12), dp(8), dp(12), dp(8))
         layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) }

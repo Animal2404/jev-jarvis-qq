@@ -41,6 +41,7 @@ object ConfigBackup {
         "reply_model" to p.replyModel,
         "reply_thinking" to p.replyThinking,
         "reply_window" to p.replyWindow,
+        "user_prompt" to p.userPrompt,
         "judge_window" to p.judgeWindow,
         // vision route
         "vision_base_url" to p.visionBaseUrl,
@@ -134,6 +135,7 @@ object ConfigBackup {
         str("reply_model") { p.replyModel = it }
         bool("reply_thinking") { p.replyThinking = it }
         int("reply_window") { p.replyWindow = it }
+        str("user_prompt") { p.userPrompt = it }
         int("judge_window") { p.judgeWindow = it }
         str("vision_base_url") { p.visionBaseUrl = it }
         str("vision_key") { p.visionKey = it }

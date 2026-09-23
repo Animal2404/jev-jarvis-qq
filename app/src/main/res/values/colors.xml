@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Light values. The same names exist in values-night/colors.xml with dark values,
+  so the theme resolves correctly per mode.
+
+  These must stay in sync with Palette.kt, which is what the code-built views
+  read. Both are needed: the XML side styles the window and framework widgets,
+  the Kotlin side styles everything this app draws itself.
+-->
+<resources>
+    <color name="window_bg">#F2F3F5</color>
+    <color name="card_bg">#FFFFFF</color>
+    <color name="ink">#111827</color>
+    <color name="accent">#3A7AFE</color>
+</resources>

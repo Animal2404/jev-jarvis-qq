@@ -2,7 +2,7 @@ name: Build APK
 
 # Builds the app entirely in the cloud and attaches the APK to a Release.
 #
-# Trigger it from the Actions tab ("Run workflow"), or push a tag like v1.8.
+# Trigger it from the Actions tab ("Run workflow"), or push a tag like v1.9.
 # No credentials are involved: the APK ships without API keys and each user
 # pastes their own into the settings page.
 
@@ -98,16 +98,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk dist/jev-assistant-v1.8-qq.apk
+          cp app/build/outputs/apk/release/app-release.apk dist/jev-assistant-v1.9-qq.apk
           cd dist
-          sha256sum jev-assistant-v1.8-qq.apk > SHA256SUMS.txt
+          sha256sum jev-assistant-v1.9-qq.apk > SHA256SUMS.txt
           cat SHA256SUMS.txt
-          echo "size=$(du -h jev-assistant-v1.8-qq.apk | cut -f1)" >> "$GITHUB_OUTPUT"
+          echo "size=$(du -h jev-assistant-v1.9-qq.apk | cut -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Upload as workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: jev-assistant-v1.8-qq
+          name: jev-assistant-v1.9-qq
           path: dist/
 
       - name: Resolve release tag
@@ -118,7 +118,7 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           else
-            echo "name=v1.8-build${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+            echo "name=v1.9-build${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Publish Release
@@ -126,12 +126,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.name }}
-          name: 对话副驾 v1.8（备份修复 · 上下文窗口可调）
+          name: 对话副驾 v1.9（人味提示词 · 深色模式 · 悬浮窗暂停）
           body: |
             ## 安装
 
             ```bash
-            adb install -r jev-assistant-v1.8-qq.apk
+            adb install -r jev-assistant-v1.9-qq.apk
             ```
 
             或把 APK 直接传到手机点击安装（arm64 机型，**Android 9 ~ 17**）。

@@ -192,12 +192,20 @@ class Prefs(context: Context, prefsName: String = PREFS_MAIN) {
         set(v) = sp.edit().putInt(K_PANEL_H, v).apply()
 
     /**
-     * How many recent messages the reply model sees. Used to be hard-coded at
-     * 10, which is why replies looked like they answered only the last line:
-     * the model never saw the rest of the thread.
+     * Extra instructions the user typed, appended AFTER the built-in prompt
+     * (see PromptLibrary.compose). Empty by default: the built-in prompt is
+     * designed to work alone, and this is only for refinement.
+     */
+    var userPrompt: String
+        get() = sp.getString(K_USER_PROMPT, "") ?: ""
+        set(v) = sp.edit().putString(K_USER_PROMPT, v.trim()).apply()
+
+    /**
+     * How many recent messages the reply model sees.
      *
-     * 30 by default — enough for a group to have a topic, still cheap. Capped at
-     * [MAX_WINDOW] because the capture only collects what is on screen.
+     * 20 by default. With only the last few lines the drafts answered the final
+     * sentence and ignored what the conversation was about; 20 is enough for a
+     * group to have established a topic while staying cheap.
      */
     var replyWindow: Int
         get() = sp.getInt(K_REPLY_WINDOW, DEFAULT_WINDOW).coerceIn(MIN_WINDOW, MAX_WINDOW)
@@ -381,6 +389,7 @@ class Prefs(context: Context, prefsName: String = PREFS_MAIN) {
         private const val K_AUTO = "auto_analyze"
         private const val K_REPLY_THINKING = "reply_thinking"
         private const val K_REPLY_WINDOW = "reply_window"
+        private const val K_USER_PROMPT = "user_prompt"
         private const val K_JUDGE_WINDOW = "judge_window"
         private const val K_GROUP_MODE = "group_mode"
         private const val K_GROUP_TARGET = "group_target"
@@ -436,7 +445,7 @@ class Prefs(context: Context, prefsName: String = PREFS_MAIN) {
         /** Message-window bounds. See [replyWindow] / [judgeWindow]. */
         const val MIN_WINDOW = 3
         const val MAX_WINDOW = 60
-        const val DEFAULT_WINDOW = 30
-        const val DEFAULT_JUDGE_WINDOW = 40
+        const val DEFAULT_WINDOW = 20
+        const val DEFAULT_JUDGE_WINDOW = 20
     }
 }
