@@ -2,7 +2,7 @@ name: Build APK
 
 # Builds the app entirely in the cloud and attaches the APK to a Release.
 #
-# Trigger it from the Actions tab ("Run workflow"), or push a tag like v1.4.
+# Trigger it from the Actions tab ("Run workflow"), or push a tag like v1.6.
 # No credentials are involved: the APK ships without API keys and each user
 # pastes their own into the settings page.
 
@@ -66,16 +66,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk dist/jev-assistant-v1.4-qq.apk
+          cp app/build/outputs/apk/release/app-release.apk dist/jev-assistant-v1.6-qq.apk
           cd dist
-          sha256sum jev-assistant-v1.4-qq.apk > SHA256SUMS.txt
+          sha256sum jev-assistant-v1.6-qq.apk > SHA256SUMS.txt
           cat SHA256SUMS.txt
-          echo "size=$(du -h jev-assistant-v1.4-qq.apk | cut -f1)" >> "$GITHUB_OUTPUT"
+          echo "size=$(du -h jev-assistant-v1.6-qq.apk | cut -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Upload as workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: jev-assistant-v1.4-qq
+          name: jev-assistant-v1.6-qq
           path: dist/
 
       - name: Resolve release tag
@@ -86,7 +86,7 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           else
-            echo "name=v1.4-build${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+            echo "name=v1.6-build${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Publish Release
@@ -94,15 +94,15 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.name }}
-          name: 对话副驾 v1.4（QQ 适配 · 云端构建）
+          name: 对话副驾 v1.6（Android 9~17 · 群聊 · 云端构建）
           body: |
             ## 安装
 
             ```bash
-            adb install -r jev-assistant-v1.4-qq.apk
+            adb install -r jev-assistant-v1.6-qq.apk
             ```
 
-            或把 APK 直接传到手机点击安装（arm64 机型，Android 11+）。
+            或把 APK 直接传到手机点击安装（arm64 机型，**Android 9 ~ 17**）。
 
             ## 首次使用要填两个密钥
 
@@ -115,13 +115,29 @@ jobs:
 
             两路预设都已内置为默认值，只需粘两条密钥。填完点「测试判断」「测试回复」确认通了再保存。
 
+            > 设置页有「备份与恢复」：导出一个配置文件存在手机里，卸载重装后导回来，
+            > 密钥和所有设置都不用重填。
+
             ## 这一版改了什么
 
-            - **手机 QQ 适配**（采集逻辑采自上游 v1.3 的真机验证）：无障碍读节点，正文 `id/mjn`、
-              标题 `id/371`、输入框 `id/input`。发送永远由你手动点。
-            - **判断接口 → Knox Studio**：设置页新增该档并设为默认，模型 `jev-1.13.0`。
-            - **回复接口 → TokenRhythm**：设置页新增该档并设为默认，模型 `mimo-v2.6-flash`。
-            - **视觉接口**（OCR 兜底）同样默认走 TokenRhythm 的 `mimo-v2.6-flash`。
+            - **回复不再有 AI 味**：system 提示词从「你是回复助手」改为**人设身份**
+              （「你就是一个普通人在用手机聊天…不是助手，不是 AI」），并采用
+              [NeoBot](https://github.com/SuperQuail/NeoBot) 的几条实测有效规则：
+              不要回复得太有条理、平淡简短、禁止用（）描述动作、给出「错误→正确」样例。
+              实测整洁度（三条回复的长度均匀程度）由 26 降到 10~17，平均 5~8 字。
+            - **修复「别人的消息被识别成我」**：侧别判断原来把气泡边沿与头像列比较，
+              长消息必然判反（截图实测：唐天 → 我）。改为与气泡自己的锚点比较，
+              8/8 几何用例通过。顺带修复群昵称绑定，群聊模式现在能真正生效。
+            - **「目前对话」面板**：悬浮窗顶部显示本次判断依据的最后 6 条消息，
+              群聊里显示真实昵称，最新一条加粗并注明「判断针对的就是这句」。
+            - **群聊模式**：识别发言人、按「群里的人」而非「对方」判断，
+              候选回复按群聊礼节生成（短、不煽情、不乱用亲密称呼），可指定只回复某人。
+            - **思考开关**：回复模型默认关闭思考（实测中位 4.5s vs 7.3s，快 40%）。
+            - **悬浮窗可拉伸**：右下角把手拖动改尺寸，松手即记住。
+            - **兼容 Android 9 ~ 17**：minSdk 28 / targetSdk 36。唯一要 API 30 的
+              免 root 截屏只用于 OCR 兜底，低版本会明确提示不支持，其余功能正常。
+            - **修复回复乱码**：模型返回 `{"content":…}` 这类对象时不再把 JSON 原文
+              显示/填入，并修掉「占位符被排到第一」的 bug。
 
             ## 校验
 
@@ -129,9 +145,9 @@ jobs:
 
             ## 已知边界（未在真机复验）
 
-            - 本次改动是把接口换成 Knox / TokenRhythm，**APK 未在真机上跑过**：QQ 采集逻辑
-              来自上游真机验证（QQ 9.3.50 / 小米 14），但换接口后的端到端流程需要你装到
-              手机上实测一次。
+            - **APK 未在真机上跑过**：QQ 采集几何、群昵称绑定、提示词效果均为本地
+              等价验证 + 云端编译通过，需装到手机上实测。
+            - Android 9/10 上 OCR 兜底不可用（系统无免 root 截屏 API），其余功能正常。
             - 小米 / HyperOS 装完请按主页向导开「无障碍 + 悬浮窗 + 自启动/省电无限制」。
 
             ## 说明
