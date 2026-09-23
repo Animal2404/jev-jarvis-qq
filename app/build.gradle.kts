@@ -10,9 +10,15 @@ plugins {
 // (storeFile / storePassword / keyAlias / keyPassword). Override the path with
 // the JEV_KEYSTORE_PROPS env var. Without it (the CI case) the release build
 // falls back to the debug key so the published APK stays installable.
+//
+// Resolved through java.io.File, NOT Gradle's file(): the latter parses a
+// Windows path like "H:/android/keys/..." as a URL whose scheme is "H" and
+// hard-fails the entire build on Linux ("Cannot convert URL ... to a file").
+val releasePropsFile = java.io.File(
+    System.getenv("JEV_KEYSTORE_PROPS") ?: "H:/android/keys/jev-release.properties"
+)
 val releaseProps = Properties().apply {
-    val f = file(System.getenv("JEV_KEYSTORE_PROPS") ?: "H:/android/keys/jev-release.properties")
-    if (f.exists()) FileInputStream(f).use { load(it) }
+    if (releasePropsFile.isFile) FileInputStream(releasePropsFile).use { load(it) }
 }
 
 android {

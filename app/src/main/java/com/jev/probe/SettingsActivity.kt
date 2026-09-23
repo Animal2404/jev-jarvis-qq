@@ -27,7 +27,9 @@ import com.jev.probe.core.Prefs
 import com.jev.probe.core.kb.KbSelfCheck
 import com.jev.probe.core.kb.KbStore
 import com.jev.probe.jev.JudgeClient
+import com.jev.probe.jev.ModelCatalog
 import com.jev.probe.jev.ReplyClient
+import com.jev.probe.jev.Route
 import com.jev.probe.jev.VisionClient
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
@@ -113,6 +115,27 @@ class SettingsActivity : AppCompatActivity() {
         judgeCard.addView(label("模型"))
         judgeCard.addView(judgeModelEdit)
         val judgeResult = resultText()
+        // The judge route is a Jev/System One endpoint, not a chat-completions
+        // one, so it only offers a model list on the custom path where the user
+        // points at their own OpenAI-compatible gateway.
+        judgeCard.addView(rowBtn("获取模型列表（仅自定义档）") {
+            val base = judgeBaseEdit.text.toString().trim()
+            val key = judgeKeyEdit.text.toString().trim()
+            if (base.isBlank()) { judgeResult.text = "先填 Base URL"; return@rowBtn }
+            judgeResult.text = "正在获取模型列表…"
+            worker.execute {
+                var err: String? = null
+                val models = try {
+                    ModelCatalog.fetch(base, key, Route.JUDGE)
+                } catch (e: Exception) { err = e.message; emptyList() }
+                main.post {
+                    if (err != null) { judgeResult.text = "获取失败：$err"; return@post }
+                    if (models.isEmpty()) { judgeResult.text = "该地址没有返回任何模型"; return@post }
+                    judgeResult.text = "共 ${models.size} 个模型，选一个："
+                    showModelPicker(models, judgeModelEdit, judgeResult)
+                }
+            }
+        })
         judgeCard.addView(cardBtn("测试判断") {
             val base = judgeBaseEdit.text.toString().trim()
             val key = judgeKeyEdit.text.toString().trim()
@@ -182,7 +205,26 @@ class SettingsActivity : AppCompatActivity() {
         replyCard.addView(edit(prefs.replyKey, "TokenRhythm 的密钥（留空才回落到判断接口密钥）", password = true).also { replyKeyEdit = it })
         replyCard.addView(label("模型"))
         replyCard.addView(replyModelEdit)
+        // Declared before the buttons that write into it (both the model picker
+        // and the connectivity test report through this one line).
         val replyResult = resultText()
+        replyCard.addView(rowBtn("获取模型列表") {
+            val base = replyBaseEdit.text.toString().trim().ifBlank { Prefs.TOKENRHYTHM_BASE }
+            val key = replyKeyEdit.text.toString().trim().ifBlank { judgeKeyEdit.text.toString().trim() }
+            replyResult.text = "正在获取模型列表…"
+            worker.execute {
+                var err: String? = null
+                val models = try {
+                    ModelCatalog.fetch(base, key, Route.REPLY)
+                } catch (e: Exception) { err = e.message; emptyList() }
+                main.post {
+                    if (err != null) { replyResult.text = "获取失败：$err"; return@post }
+                    if (models.isEmpty()) { replyResult.text = "该地址没有返回任何模型"; return@post }
+                    replyResult.text = "共 ${models.size} 个模型，选一个："
+                    showModelPicker(models, replyModelEdit, replyResult)
+                }
+            }
+        })
         replyCard.addView(cardBtn("测试回复") {
             val base = replyBaseEdit.text.toString().trim()
             val model = replyModelEdit.text.toString().trim()
@@ -238,6 +280,25 @@ class SettingsActivity : AppCompatActivity() {
         visionCard.addView(label("模型"))
         visionCard.addView(visionModelEdit)
         val visionResult = resultText()
+        visionCard.addView(rowBtn("获取模型列表") {
+            val base = visionBaseEdit.text.toString().trim().ifBlank { Prefs.TOKENRHYTHM_BASE }
+            val key = visionKeyEdit.text.toString().trim()
+                .ifBlank { replyKeyEdit.text.toString().trim() }
+                .ifBlank { judgeKeyEdit.text.toString().trim() }
+            visionResult.text = "正在获取模型列表…"
+            worker.execute {
+                var err: String? = null
+                val models = try {
+                    ModelCatalog.fetch(base, key, Route.VISION)
+                } catch (e: Exception) { err = e.message; emptyList() }
+                main.post {
+                    if (err != null) { visionResult.text = "获取失败：$err"; return@post }
+                    if (models.isEmpty()) { visionResult.text = "该地址没有返回任何模型"; return@post }
+                    visionResult.text = "共 ${models.size} 个模型，选一个："
+                    showModelPicker(models, visionModelEdit, visionResult)
+                }
+            }
+        })
         visionCard.addView(cardBtn("测试视觉") {
             val visionBase = visionBaseEdit.text.toString().trim()
             if (!VisionClient.supportsVision(visionBase.ifBlank { Prefs.TOKENRHYTHM_BASE })) {
@@ -611,6 +672,40 @@ class SettingsActivity : AppCompatActivity() {
         layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(14) }
         setOnClickListener { onClick() }
+    }
+
+    /** Small outlined button that sits inline, under the field it acts on. */
+    private fun rowBtn(label: String, onClick: () -> Unit) = TextView(this).apply {
+        text = label; textSize = 13f; gravity = Gravity.CENTER; setTypeface(typeface, Typeface.BOLD)
+        setTextColor(accent); background = round(dp(9), Color.WHITE, stroke = true)
+        setPadding(dp(12), dp(8), dp(12), dp(8))
+        layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) }
+        setOnClickListener { onClick() }
+    }
+
+    /**
+     * Scrollable single-choice list of models. Picking one writes it into [target]
+     * (the model field) but does NOT save — the user still presses 保存 All, which
+     * keeps the picker from mutating stored config behind their back.
+     */
+    private fun showModelPicker(
+        models: List<ModelCatalog.Entry>,
+        target: EditText,
+        result: TextView
+    ) {
+        val current = target.text.toString().trim()
+        val labels = models.map { if (it.id == current) "✓ ${it.label}" else it.label }.toTypedArray()
+        val checked = models.indexOfFirst { it.id == current }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("选择模型（共 ${models.size} 个）")
+            .setSingleChoiceItems(labels, checked) { dialog, which ->
+                target.setText(models[which].id)
+                result.text = "已选：${models[which].id}（点「保存全部设置」生效）"
+                dialog.dismiss()
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     private fun round(radius: Int, color: Int, stroke: Boolean = false) = GradientDrawable().apply {

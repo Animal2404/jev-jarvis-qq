@@ -113,6 +113,60 @@ object HttpJson {
         } catch (_: Exception) { "" }
     }
 
+    /**
+     * GET returning a JSON object (used by the model-list picker). Same retry
+     * and error-normalization rules as [post]; only 429/529 and transport
+     * failures are retried, other 4xx bubble up immediately.
+     */
+    fun get(
+        url: String,
+        key: String,
+        route: String,
+        extraHeaders: Map<String, String> = emptyMap()
+    ): JSONObject {
+        var attempt = 0
+        var last: ApiException? = null
+        while (attempt < MAX_ATTEMPTS) {
+            var conn: HttpURLConnection? = null
+            try {
+                conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 15000
+                    readTimeout = 20000
+                    setRequestProperty("Accept", "application/json")
+                    if (key.isNotBlank()) setRequestProperty("Authorization", "Bearer $key")
+                    extraHeaders.forEach { (k, v) -> setRequestProperty(k, v) }
+                }
+                val code = conn.responseCode
+                if (code == 429 || code == 529) {
+                    last = ApiException(route, code, "服务繁忙，已重试")
+                    attempt++
+                    if (attempt < MAX_ATTEMPTS) Thread.sleep(500L * (1L shl attempt))
+                    continue
+                }
+                if (code !in 200..299) {
+                    val errText = readBody(conn.errorStream)
+                    throw ApiException(route, code, errText.ifBlank { "（响应体为空）" })
+                }
+                val text = readBody(conn.inputStream)
+                if (text.isBlank()) throw ApiException(route, code, "响应体为空")
+                return JSONObject(text)
+            } catch (e: ApiException) {
+                if (e.status != null && e.status in 400..499) throw e
+                last = e
+                attempt++
+                if (attempt < MAX_ATTEMPTS) Thread.sleep(500L * (1L shl attempt))
+            } catch (e: Exception) {
+                last = ApiException(route, null, describe(e))
+                attempt++
+                if (attempt < MAX_ATTEMPTS) Thread.sleep(500L * (1L shl attempt))
+            } finally {
+                conn?.disconnect()
+            }
+        }
+        throw last ?: ApiException(route, null, "请求失败")
+    }
+
     /** OpenRouter wants attribution headers; other hosts reject unknown ones politely. */
     fun headersFor(url: String): Map<String, String> =
         if (url.contains("openrouter.ai", ignoreCase = true))
