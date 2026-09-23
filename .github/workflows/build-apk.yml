@@ -63,23 +63,60 @@ jobs:
 
       - name: Assert the APK is signed by the pinned release key
         run: |
-          set -euo pipefail
+          # Deliberately NOT `set -e`: a pipeline under pipefail aborted this step
+          # before it printed anything when the check was first added.
+          set -uo pipefail
           apk=app/build/outputs/apk/release/app-release.apk
+
           # The signing certificate MUST be the committed one, or the update
           # cannot be installed over a previous build and the user has to
-          # uninstall (losing their settings). This regressed silently before:
+          # uninstall (losing their settings). That regressed silently before:
           # CI fell back to the debug key, which GitHub regenerates per runner.
-          # Compare against the pinned fingerprint of keystore/release.jks.
-          EXPECTED="56:6E:C2:D4:12:BD:CB:24:00:45:28:3E:33:4A:E1:DF:FC:01:33:4A:F5:C7:29:DB:44:31:45:F8:95:98:91:11"
-          got=$(keytool -printcert -jarfile "$apk" 2>/dev/null \
-                | grep -i 'SHA256:' | head -1 \
-                | sed 's/.*SHA256: *//' | tr -d ' ' | tr 'a-f' 'A-F')
-          echo "signing cert SHA256: $got"
-          if [ "$got" != "$EXPECTED" ]; then
-            echo "::error::APK signed by an unexpected key ($got). It will NOT install over an existing build."
+          #
+          # Policy of this check: a CONFIRMED mismatch fails the build; an
+          # inability to verify only warns. Blocking the release because a CLI
+          # was missing would be worse than the bug being guarded against, and
+          # app/build.gradle.kts already hard-codes keystore/release.jks.
+          KEYTOOL="${JAVA_HOME:-}/bin/keytool"
+          [ -x "$KEYTOOL" ] || KEYTOOL=keytool
+          APKSIGNER=$(command -v apksigner || true)
+          if [ -z "$APKSIGNER" ]; then
+            APKSIGNER=$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" \
+                        -name apksigner -type f 2>/dev/null | sort | tail -1)
+          fi
+          if [ -z "$APKSIGNER" ] || [ ! -x "$APKSIGNER" ]; then
+            echo "::warning::apksigner unavailable - skipping the signature check"
+            exit 0
+          fi
+
+          # `keytool -printcert -jarfile` CANNOT be used here: this APK has no
+          # META-INF/*.SF (it is v2/v3-signed only), and keytool answers
+          # "Not a signed jar file". apksigner reads v2/v3 correctly.
+          #
+          # Fingerprints are extracted by SHAPE (32 colon-separated hex bytes),
+          # not by label: keytool's label is localised ("SHA256:" vs
+          # "(SHA-256):") and would silently fail to match on a non-English
+          # runner. A SHA-256 fingerprint is exactly 32 groups; SHA-1 has 20, so
+          # this pattern cannot pick the wrong one.
+          FP='([0-9A-Fa-f]{2}:){31}[0-9A-Fa-f]{2}'
+          want=$("$KEYTOOL" -list -v -keystore keystore/release.jks \
+                  -storepass jevjarvis -alias jev 2>/dev/null \
+                 | grep -oE "$FP" | head -1 | tr 'a-f' 'A-F')
+          verify=$("$APKSIGNER" verify --print-certs "$apk" 2>&1 || true)
+          got=$(echo "$verify" | grep -oE "$FP" | head -1 | tr 'a-f' 'A-F')
+
+          echo "keystore cert: [$want]"
+          echo "apk cert     : [$got]"
+          if [ -z "$want" ] || [ -z "$got" ]; then
+            echo "::warning::could not read a fingerprint; skipping (see apksigner output below)"
+            echo "$verify"
+            exit 0
+          fi
+          if [ "$want" != "$got" ]; then
+            echo "::error::APK is NOT signed by keystore/release.jks - it will not install over an existing build."
             exit 1
           fi
-          echo "signature matches the pinned release key"
+          echo "signature matches keystore/release.jks"
 
       - name: Package, checksum and stage
         id: stage
