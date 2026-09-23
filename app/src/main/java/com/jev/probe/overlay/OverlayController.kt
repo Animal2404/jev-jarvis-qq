@@ -21,6 +21,7 @@ import android.widget.TextView
 import android.widget.Toast
 import com.jev.probe.core.Analysis
 import com.jev.probe.core.ChatSnapshot
+import com.jev.probe.core.Msg
 import com.jev.probe.core.Prefs
 import com.jev.probe.core.RankedReply
 import kotlin.math.abs
@@ -61,6 +62,14 @@ class OverlayController(private val ctx: Context) {
 
     /** A caveat about how the current snapshot was captured (OCR mode). */
     private var noteText: String? = null
+
+    /**
+     * The messages Jev actually judged, so the panel can show which exchange the
+     * reading is about. Without this the user cannot tell whether the analysis
+     * refers to the last bubble, the whole screen, or something stale.
+     */
+    private var conversation: List<Msg> = emptyList()
+    private var conversationTitle: String? = null
 
     /** Whether the overlay window is currently on screen. */
     fun isShowing(): Boolean = root != null
@@ -310,6 +319,11 @@ class OverlayController(private val ctx: Context) {
         lastFill = null
         noteText = null
         replyError = null
+        // The transcript belongs to the conversation being dropped, so it must
+        // go too — otherwise the new chat's panel would show the old chat's
+        // messages above its analysis.
+        conversation = emptyList()
+        conversationTitle = null
         contentBox?.removeAllViews()
     }
 
@@ -339,6 +353,16 @@ class OverlayController(private val ctx: Context) {
     /** A caveat line for the panel (OCR mode); null clears it. */
     fun setNote(note: String?) {
         noteText = note
+    }
+
+    /**
+     * Record which messages this analysis is based on (the last few bubbles of
+     * the open conversation). Shown as a 「目前对话」 block so the user can see
+     * exactly what Jev was looking at.
+     */
+    fun setConversation(title: String?, messages: List<Msg>) {
+        conversationTitle = title
+        conversation = messages.takeLast(CONVERSATION_SHOWN)
     }
 
     /**
@@ -397,6 +421,10 @@ class OverlayController(private val ctx: Context) {
         // How this snapshot was captured, when it changes how to read it.
         noteText?.let { if (it.isNotBlank()) views.add(hint(it)) }
 
+        // Which exchange was judged — the user must be able to tell what Jev is
+        // reacting to, since the panel covers the very messages it analyzed.
+        views.addAll(conversationViews())
+
         // Danger badge — the alarm signal, up top and color-coded.
         a.dangerLevel?.let {
             val lvl = it.score.roundToInt()
@@ -436,8 +464,76 @@ class OverlayController(private val ctx: Context) {
         if (!expanded) toggle()
     }
 
-    private fun dangerBadge(lvl: Int, max: Int): View {
-        val color = dangerColor(lvl)
+    /**
+     * The 「目前对话」 block: the last few bubbles Jev judged, oldest first, with
+     * the newest one highlighted — that final line is the message the judgment
+     * is really about ("对方真实意图" describes THAT bubble).
+     *
+     * Rendered as a boxed list so it reads as a transcript rather than as more
+     * analysis text, and returns an empty list when there is nothing captured.
+     */
+    private fun conversationViews(): List<View> {
+        if (conversation.isEmpty()) return emptyList()
+        val out = ArrayList<View>()
+
+        val head = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(6), 0, dp(2))
+        }
+        head.addView(TextView(ctx).apply {
+            text = "目前对话"
+            setTextColor(Color.parseColor("#374151")); textSize = 12f
+            setTypeface(typeface, Typeface.BOLD)
+        })
+        conversationTitle?.takeIf { it.isNotBlank() }?.let {
+            head.addView(TextView(ctx).apply {
+                text = "  $it"
+                setTextColor(Color.parseColor("#9CA3AF")); textSize = 11f
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            })
+        }
+        out.add(head)
+
+        val box = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            background = card(10, Color.parseColor("#F9FAFB"))
+            setPadding(dp(8), dp(6), dp(8), dp(6))
+        }
+        val last = conversation.lastIndex
+        conversation.forEachIndexed { i, m ->
+            val isLatest = i == last
+            val row = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(0, dp(1), 0, dp(1))
+            }
+            row.addView(TextView(ctx).apply {
+                text = if (m.side == "me") "我" else "对方"
+                setTextColor(Color.parseColor(if (m.side == "me") "#3A7AFE" else "#D97706"))
+                textSize = 11f
+                setTypeface(typeface, Typeface.BOLD)
+                minWidth = dp(34)
+            })
+            row.addView(TextView(ctx).apply {
+                text = m.text
+                setTextColor(Color.parseColor(if (isLatest) "#111827" else "#6B7280"))
+                textSize = 12f
+                if (isLatest) setTypeface(typeface, Typeface.BOLD)
+                maxLines = 2
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            box.addView(row)
+        }
+        out.add(box)
+        // Name the bubble the judgment is about, so "对方真实意图" below is unambiguous.
+        out.add(hint("↑ 最新一条（${if (conversation.last().side == "me") "我" else "对方"}）" +
+            "就是下面判断针对的那句"))
+        return out
+    }
+
+    private fun dangerBadge(lvl: Int, max: Int): View {        val color = dangerColor(lvl)
         val row = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setPadding(0, 0, 0, dp(6))
@@ -546,6 +642,9 @@ class OverlayController(private val ctx: Context) {
     }
 
     companion object {
+        /** How many recent bubbles the 「目前对话」 block shows. */
+        private const val CONVERSATION_SHOWN = 6
+
         private val INTENT = mapOf(
             "confirm_you_care" to "确认你在不在乎", "vent_anger" to "在发泄情绪",
             "request_action" to "要你办事", "seek_explanation" to "要个解释",

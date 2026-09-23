@@ -245,7 +245,11 @@ open class ChatCaptureService : AccessibilityService() {
         if (analyzing) return
         if (!prefs.hasKey()) { main.post { overlay?.showError("未设置判断接口密钥，去设置里填") }; return }
         analyzing = true
-        main.post { overlay?.showLoading(); overlay?.setNote(snapshot.note) }
+        main.post {
+            overlay?.showLoading()
+            overlay?.setNote(snapshot.note)
+            overlay?.setConversation(snapshot.title, snapshot.messages)
+        }
         val client = JevClient(prefs)
         val rel = prefs.relationship
         val pkg = activePkg ?: ""
@@ -467,6 +471,7 @@ open class ChatCaptureService : AccessibilityService() {
             runAnalysis()
         } else {
             overlay?.setNote(snapshot.note)
+            overlay?.setConversation(snapshot.title, snapshot.messages)
             overlay?.showIdle(snapshot.title)
         }
     }
