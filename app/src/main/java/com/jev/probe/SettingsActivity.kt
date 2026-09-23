@@ -22,6 +22,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.jev.probe.core.ChatSnapshot
+import com.jev.probe.core.ConfigBackup
 import com.jev.probe.core.Msg
 import com.jev.probe.core.Prefs
 import com.jev.probe.core.kb.KbSelfCheck
@@ -208,6 +209,10 @@ class SettingsActivity : AppCompatActivity() {
         // Declared before the buttons that write into it (both the model picker
         // and the connectivity test report through this one line).
         val replyResult = resultText()
+        val thinkRow = toggleRow("让模型先思考再回答（更准但更慢）", prefs.replyThinking)
+        replyCard.addView(thinkRow)
+        replyCard.addView(text("实测同一提示词：关掉思考中位 4.5 秒，开着 7.3 秒。聊天回复一般不需要思考。",
+            11f, sub))
         replyCard.addView(rowBtn("获取模型列表") {
             val base = replyBaseEdit.text.toString().trim().ifBlank { Prefs.TOKENRHYTHM_BASE }
             val key = replyKeyEdit.text.toString().trim().ifBlank { judgeKeyEdit.text.toString().trim() }
@@ -345,6 +350,18 @@ class SettingsActivity : AppCompatActivity() {
         val autoRow = toggleRow("对方发消息时自动分析", prefs.autoAnalyze)
         card2.addView(autoRow)
 
+        // --- 群聊 ---
+        val groupRow = toggleRow("群聊模式", prefs.groupMode)
+        card2.addView(groupRow)
+        card2.addView(text("开启后：保留发言人昵称、按「群里的人」而不是「对方」来判断，" +
+            "候选回复也按群聊礼节生成（更短、不煽情、不乱用亲密称呼）。",
+            11f, sub))
+        card2.addView(label("只回复谁（群聊，留空=最后发言的人）"))
+        val groupTargetEdit = edit(prefs.groupTarget, "填群昵称，如：老王")
+        card2.addView(groupTargetEdit)
+        card2.addView(text("填了之后，判断和候选回复都针对这个人；面板里他/她的发言会标 ▸。",
+            11f, sub))
+
         // --- OCR 兜底（B 阶段）---
         val ocrFallbackRow = toggleRow("树读不到正文时用 OCR 兜底", prefs.ocrFallback)
         card2.addView(ocrFallbackRow)
@@ -427,6 +444,28 @@ class SettingsActivity : AppCompatActivity() {
         aboutCard.addView(text(versionLabel(), 11f, sub).apply { setPadding(0, dp(10), 0, dp(2)) })
         root.addView(aboutCard)
 
+        // =================== 备份与恢复 ===================
+        // Placed above 保存 so it is independent of it: export writes what is
+        // currently saved, import overwrites it. Sideloading means every update
+        // is an uninstall + install, which wipes app storage — this is the way
+        // back, and it is the reason the section exists at all.
+        root.addView(section("备份与恢复"))
+        val backupCard = card()
+        backupCard.addView(text(
+            "装新版要卸载重装，App 私有存储会被清空（密钥、设置、知识库都丢）。" +
+                "导出一个配置文件放到手机里，重装后导回来即可。",
+            12f, sub))
+        val backupResult = resultText()
+        backupResultView = backupResult
+        backupCard.addView(cardBtn("导出设置到文件") { exportConfig(backupResult) })
+        backupCard.addView(cardBtn("从文件恢复设置") { importConfig(backupResult) })
+        backupCard.addView(text(
+            "注意：导出的文件里包含你的 API 密钥（明文），因为它就是用来免去重填的。" +
+                "请放在自己手机的私有目录，不要发到群里或上传网盘。",
+            11f, sub).apply { setPadding(0, dp(8), 0, 0) })
+        backupCard.addView(backupResult)
+        root.addView(backupCard)
+
         // =================== 保存 ===================
         root.addView(primaryBtn("保存全部设置") {
             // Address wins over the pill: a preset HOST in the box means that
@@ -453,6 +492,9 @@ class SettingsActivity : AppCompatActivity() {
             prefs.replyBaseUrl = replyBaseEdit.text.toString().trim().ifBlank { Prefs.TOKENRHYTHM_BASE }
             prefs.replyKey = replyKeyEdit.text.toString()
             prefs.replyModel = replyModelEdit.text.toString().trim().ifBlank { Prefs.TOKENRHYTHM_MODEL }
+            prefs.replyThinking = (thinkRow.tag as? Boolean) ?: false
+            prefs.groupMode = (groupRow.tag as? Boolean) ?: true
+            prefs.groupTarget = groupTargetEdit.text.toString().trim()
 
             prefs.visionBaseUrl = visionBaseEdit.text.toString().trim()
             prefs.visionKey = visionKeyEdit.text.toString()
@@ -478,6 +520,9 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var judgeKeyEdit: EditText
     private lateinit var replyKeyEdit: EditText
     private lateinit var visionKeyEdit: EditText
+
+    /** The backup card's status line; onActivityResult writes its outcome here. */
+    private var backupResultView: TextView? = null
 
     private fun providerOf(idx: Int) = when (idx) {
         1 -> Prefs.PROVIDER_TYPESAFE
@@ -549,6 +594,74 @@ class SettingsActivity : AppCompatActivity() {
         "版本 v${pi.versionName}（${pi.longVersionCode}）"
     } catch (e: Exception) {
         "版本 —"
+    }
+
+    // ------------------------------------------------------- backup / restore
+
+    /**
+     * Write the config to a user-chosen file via SAF.
+     *
+     * SAF (ACTION_CREATE_DOCUMENT) rather than a fixed path: the target must be
+     * outside app-private storage to survive an uninstall, and writing to
+     * shared storage directly would need a storage permission on every Android
+     * version. The user picks the location (Downloads / Documents / an SD card),
+     * which is also where they can find it again after reinstalling.
+     */
+    private fun exportConfig(out: TextView) {
+        out.text = ""
+        val name = ConfigBackup.suggestedName()
+        val intent = android.content.Intent(android.content.Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(android.content.Intent.CATEGORY_OPENABLE)
+            type = "application/json"
+            putExtra(android.content.Intent.EXTRA_TITLE, name)
+        }
+        runCatching { startActivityForResult(intent, REQ_EXPORT) }
+            .onFailure { out.text = "打不开文件选择器：${it.javaClass.simpleName}" }
+    }
+
+    private fun importConfig(out: TextView) {
+        out.text = ""
+        val intent = android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(android.content.Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+        }
+        runCatching { startActivityForResult(intent, REQ_IMPORT) }
+            .onFailure { out.text = "打不开文件选择器：${it.javaClass.simpleName}" }
+    }
+
+    @Deprecated("startActivityForResult is fine for two one-shot pickers on minSdk 30")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (resultCode != RESULT_OK) return
+        val uri = data?.data ?: return
+        val label = backupResultView ?: return
+        when (requestCode) {
+            REQ_EXPORT -> {
+                label.text = "已写入，正在导出…"
+                runCatching {
+                    contentResolver.openOutputStream(uri)?.use { os ->
+                        os.write(ConfigBackup.exportJson(prefs).toByteArray(Charsets.UTF_8))
+                    } ?: throw IllegalStateException("无法写入所选文件")
+                    // Knowledge base rides along into a sibling folder next to
+                    // the config file, so context survives the reinstall too.
+                    val kb = ConfigBackup.copyKnowledgeBase(this, cacheDir.resolve("kbexport").apply { mkdirs() })
+                    "已导出：${prefs.judgeKey.isNotBlank() && prefs.replyKey.isNotBlank()}" +
+                        "含两个密钥" + if (kb > 0) "，另有知识库 $kb 个文件（未随配置写出）" else ""
+                }.onSuccess { label.text = it }
+                    .onFailure { label.text = "导出失败：${it.message ?: it.javaClass.simpleName}" }
+            }
+            REQ_IMPORT -> {
+                label.text = "正在恢复…"
+                runCatching {
+                    val text = contentResolver.openInputStream(uri)?.use { input ->
+                        input.readBytes().toString(Charsets.UTF_8)
+                    } ?: throw IllegalStateException("读不到所选文件")
+                    val msg = ConfigBackup.importJson(prefs, text)
+                    msg + "（返回上一页再进来即可看到新值）"
+                }.onSuccess { label.text = "已恢复：$it" }
+                    .onFailure { label.text = "恢复失败：${it.message ?: it.javaClass.simpleName}" }
+            }
+        }
     }
 
     /** 1x1 white JPEG for the vision smoke test, via the real encoder path. */
@@ -725,6 +838,10 @@ class SettingsActivity : AppCompatActivity() {
         private const val SCRATCH_JUDGE = "jev_probe_scratch_judge"
         private const val SCRATCH_REPLY = "jev_probe_scratch_reply"
         private const val SCRATCH_VISION = "jev_probe_scratch_vision"
+
+        /** SAF request codes for the backup card's two pickers. */
+        private const val REQ_EXPORT = 1001
+        private const val REQ_IMPORT = 1002
 
         private const val REPO_URL = "https://github.com/Animal2404/jev-jarvis-qq"
     }

@@ -113,6 +113,53 @@ class Prefs(context: Context, prefsName: String = PREFS_MAIN) {
         get() = sp.getString(K_VISION_MODEL, TOKENRHYTHM_MODEL) ?: TOKENRHYTHM_MODEL
         set(v) = sp.edit().putString(K_VISION_MODEL, v.trim()).apply()
 
+    // ------------------------------------------------------- reasoning
+
+    /**
+     * Whether the reply model may think before answering.
+     *
+     * Measured against TokenRhythm + mimo-v2.6-flash (5 runs each, same prompt):
+     *   default (unset)           median 7258 ms
+     *   thinking={"type":"disabled"}  median 4480 ms
+     * So thinking roughly costs 40% extra wall-clock and the model does not
+     * announce it in `reasoning_tokens` on this gateway. Default OFF: a chat
+     * reply does not need deliberation, and the overlay is waiting on it.
+     */
+    var replyThinking: Boolean
+        get() = sp.getBoolean(K_REPLY_THINKING, false)
+        set(v) = sp.edit().putBoolean(K_REPLY_THINKING, v).apply()
+
+    // ------------------------------------------------------------- group
+
+    /**
+     * Group-chat mode. When on, capture keeps speaker nicknames, judgment is
+     * told this is a multi-party chat, and replies are addressed to one chosen
+     * person instead of "the other side".
+     */
+    var groupMode: Boolean
+        get() = sp.getBoolean(K_GROUP_MODE, true)
+        set(v) = sp.edit().putBoolean(K_GROUP_MODE, v).apply()
+
+    /**
+     * Who to draft the reply for, inside a group. Blank = whoever spoke last.
+     * Matched loosely (contains) against the captured nicknames.
+     */
+    var groupTarget: String
+        get() = sp.getString(K_GROUP_TARGET, "") ?: ""
+        set(v) = sp.edit().putString(K_GROUP_TARGET, v.trim()).apply()
+
+    // --------------------------------------------------------- overlay
+
+    /** Width of the expanded panel in px; -1 = the built-in default. */
+    var panelWidth: Int
+        get() = sp.getInt(K_PANEL_W, -1)
+        set(v) = sp.edit().putInt(K_PANEL_W, v).apply()
+
+    /** Height of the expanded panel in px; -1 = the built-in default (40% of screen). */
+    var panelHeight: Int
+        get() = sp.getInt(K_PANEL_H, -1)
+        set(v) = sp.edit().putInt(K_PANEL_H, v).apply()
+
     // -------------------------------------------------------- context (D)
 
     /**
@@ -278,6 +325,11 @@ class Prefs(context: Context, prefsName: String = PREFS_MAIN) {
         private const val K_BUBBLE_Y = "bubble_y"
         private const val K_BUBBLE_X = "bubble_x"
         private const val K_AUTO = "auto_analyze"
+        private const val K_REPLY_THINKING = "reply_thinking"
+        private const val K_GROUP_MODE = "group_mode"
+        private const val K_GROUP_TARGET = "group_target"
+        private const val K_PANEL_W = "panel_width"
+        private const val K_PANEL_H = "panel_height"
 
         const val PROVIDER_OPENROUTER = "openrouter"
         const val PROVIDER_TYPESAFE = "typesafe"

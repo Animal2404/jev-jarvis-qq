@@ -19,25 +19,98 @@ class ReplyClient(private val prefs: Prefs) {
      * @param ctx D-stage knowledge context. When present its background and
      *        history are prepended to the prompt with an instruction to stay
      *        consistent with them and invent nothing beyond them.
+     * @param target In a group, the person this reply is aimed at (blank = the
+     *        one who spoke last). Null or blank in a 1:1 chat.
      */
-    fun draft(snapshot: ChatSnapshot, relationship: String, ctx: ChatContext? = null): List<String> {
-        val convo = snapshot.messages.takeLast(10).joinToString("\n") {
-            (if (it.side == "me") "我" else "对方") + "：" + it.text
+    fun draft(
+        snapshot: ChatSnapshot,
+        relationship: String,
+        ctx: ChatContext? = null,
+        target: String? = null
+    ): List<String> {
+        val group = prefs.groupMode && snapshot.groupLike
+        // In a group the transcript must name the speaker, otherwise every
+        // bubble reads as the same "对方" and the model answers the wrong person.
+        val convo = snapshot.messages.takeLast(10).joinToString("\n") { m ->
+            val who = when {
+                m.side == "me" -> "我"
+                group -> m.speaker?.takeIf { it.isNotBlank() } ?: "群友"
+                else -> "对方"
+            }
+            "$who：${m.text}"
         }
         // The exact output shape is spelled out because this prompt runs on
         // small fast models that otherwise invent their own (observed live:
         // [{content,strategy}] objects, unquoted braces, full-width quotes).
-        // Stating "array of strings" alone was not enough. parseThree still
+        // Stating "array of strings" alone was not enough. extractReplies still
         // repairs whatever comes back — this just makes the good case common.
-        val sys = "你是中文即时通讯回复助手。只输出一个 JSON 数组，数组里只能有 3 个字符串元素，" +
-            "不要对象、不要键名、不要 strategy 之类的字段，就是 3 条纯文本。" +
-            "格式必须严格是：[\"第一条\",\"第二条\",\"第三条\"]。" +
-            "三条策略要有区别（例如：一条稳妥承接、一条给具体行动或承诺、一条简短低姿态）。" +
-            "每条不超过 40 字，口语、自然、像真人在聊天软件里发消息。" +
-            "不要解释，不要 markdown 代码块，不要引号以外的任何内容，直接输出那个 JSON 数组。"
+        val sys = buildString {
+            append("你是中文即时通讯回复助手。只输出一个 JSON 数组，数组里只能有 3 个字符串元素，")
+            append("不要对象、不要键名、不要 strategy 之类的字段，就是 3 条纯文本。")
+            append("格式必须严格是：[\"第一条\",\"第二条\",\"第三条\"]。")
+            if (group) {
+                // Group chats have different etiquette: a reply that works in a
+                // 1:1 ("我错了" / 长篇承诺) reads as bizarre in a group, which is
+                // exactly the "莫名其妙" the user reported.
+                append("这是一个多人群聊，房间名「${snapshot.title.orEmpty()}」。")
+                append("群聊要短、要接得住梗、不要煽情、不要长篇大论、不要像客服。")
+                append("不要用「亲爱的」「宝贝」这类一对一才合适的称呼，除非群里有人先这样叫你。")
+                append("不要在群里表白、道歉过度或说只有两个人之间才能说的话。")
+                val to = target?.takeIf { it.isNotBlank() }
+                if (to != null) {
+                    append("这 3 条都是回复给「$to」的，要能对上他/她刚说的话；")
+                    append("在群里可以直接点名（@$to）也可以不点名，选自然的。")
+                } else {
+                    append("这 3 条都是回复群里最新那条消息的。")
+                }
+            }
+            append("三条策略要有区别（例如：一条稳妥承接、一条给具体行动或承诺、一条简短低姿态）。")
+            append("每条不超过 40 字，口语、自然、像真人在聊天软件里发消息。")
+            append("不要解释，不要 markdown 代码块，不要引号以外的任何内容，直接输出那个 JSON 数组。")
+        }
         val user = knowledgeBlock(relationship, ctx) +
-            "关系：$relationship\n\n最近对话：\n$convo\n\n请给出 3 条候选回复。"
-        return parseThree(chat(sys, user, temperature = 0.8))
+            if (group) groupUserBlock(snapshot, relationship, convo, target)
+            else "关系：$relationship\n\n最近对话：\n$convo\n\n请给出 3 条候选回复。"
+
+        val first = extractReplies(chat(sys, user, temperature = 0.8))
+        if (first.size >= 3) return first.take(3)
+
+        // One retry with a blunter instruction and a lower temperature. The
+        // first attempt losing candidates is common when the model wraps them
+        // oddly or answers with prose; asking again is cheaper than padding the
+        // list with filler, which is what used to reach the panel as a bogus
+        // top-ranked suggestion.
+        val retrySys = sys + "重要：必须严格输出 3 条。上一轮你的输出格式不合法，这次只输出方括号和引号，不要任何其他字符。"
+        val second = extractReplies(chat(retrySys, user, temperature = 0.3))
+        val merged = LinkedHashSet<String>()
+        merged.addAll(first)
+        merged.addAll(second)
+        return merged.toList().take(3)
+    }
+
+    /**
+     * The group variant of the user turn. The speaker list matters: it tells the
+     * model which nicknames are actually in the room, so a draft cannot invent
+     * a person who is not there or confuse two similar names.
+     */
+    private fun groupUserBlock(
+        snapshot: ChatSnapshot,
+        relationship: String,
+        convo: String,
+        target: String?
+    ): String {
+        val sb = StringBuilder()
+        sb.append("群名：").append(snapshot.title.orEmpty().ifBlank { "（未识别）" }).append('\n')
+        val names = snapshot.speakers
+        if (names.isNotEmpty()) {
+            sb.append("群里刚发过言的人：").append(names.joinToString("、")).append('\n')
+        }
+        val to = target?.takeIf { it.isNotBlank() }
+        if (to != null) sb.append("这次要回复的人是：").append(to).append('\n')
+        sb.append("我和对方的关系（仅供参考，群聊里不一定适用）：").append(relationship).append('\n')
+        sb.append("\n最近对话（每行开头是发言人）：\n").append(convo).append('\n')
+        sb.append("\n请给出 3 条候选回复。")
+        return sb.toString()
     }
 
     /** The background + history preamble; empty string when there is no context. */
@@ -86,13 +159,39 @@ class ReplyClient(private val prefs: Prefs) {
             .put("model", prefs.replyModel)
             .put("messages", messages)
             .put("temperature", temperature)
+        applyThinking(body, prefs.replyThinking)
         val resp = HttpJson.post(url, prefs.effectiveReplyKey(), body, Route.REPLY, HttpJson.headersFor(url))
         return resp.optJSONArray("choices")?.optJSONObject(0)
             ?.optJSONObject("message")?.optString("content") ?: ""
     }
 
     /**
-     * Pull exactly 3 reply strings out of whatever the model returned.
+     * Tell the model whether it may deliberate before answering.
+     *
+     * Only the field that the gateway accepts is sent — it rejects unknown
+     * fields outright (a live probe of `chat_template_kwargs` returned
+     * HTTP 400 UNKNOWN_FIELD, which would have failed every request).
+     * `thinking: {"type": "disabled"}` is the one that measurably works on
+     * TokenRhythm + mimo: 4480 ms median vs 7258 ms when unset.
+     *
+     * When thinking is ON, nothing is sent: that is already the model's
+     * default, and adding a field it might not know is the risk we avoid.
+     */
+    private fun applyThinking(body: JSONObject, enabled: Boolean) {
+        if (enabled) return
+        body.put("thinking", JSONObject().put("type", "disabled"))
+        body.put("enable_thinking", false)
+    }
+
+    /**
+     * Pull the reply candidates out of whatever the model returned.
+     *
+     * Returns ONLY real candidates (0..3 of them) — never padded with filler.
+     * That is a deliberate change: the old version padded to 3 with
+     * "（稍等，我看下）", Jev then ranked those placeholders, and one ended up as
+     * the top suggestion at 73% in the panel. Fewer honest candidates beat a
+     * full set of invented ones; the caller retries once, and the panel says so
+     * when it cannot fill the list.
      *
      * Small models do NOT reliably emit `["a","b","c"]`. Observed live from
      * mimo-v2.6-flash on the same prompt, three runs in a row:
@@ -105,44 +204,63 @@ class ReplyClient(private val prefs: Prefs) {
      * reply text. So: parse strictly, then repair the common near-JSON shapes,
      * then fall back to scraping quoted runs, then to plain lines.
      */
-    private fun parseThree(content: String): List<String> {
+    private fun extractReplies(content: String): List<String> {
         val raw = content.trim()
-        if (raw.isEmpty()) return pad(emptyList())
+        if (raw.isEmpty()) return emptyList()
 
         // 1. Strict JSON, and unwrap object elements via their text-ish key.
         strictArray(raw)?.let { arr ->
-            val out = collectTexts(arr)
-            if (out.isNotEmpty()) return pad(out)
+            clean(collectTexts(arr)).let { if (it.isNotEmpty()) return it }
         }
 
         // 2. Repair the near-JSON shapes above, then retry strict parsing.
         val fixed = repairJson(raw)
         if (fixed != raw) {
             strictArray(fixed)?.let { arr ->
-                val out = collectTexts(arr)
-                if (out.isNotEmpty()) return pad(out)
+                clean(collectTexts(arr)).let { if (it.isNotEmpty()) return it }
             }
         }
 
         // 3. Scrape quoted runs (handles the full-width-quote case cleanly).
-        QUOTED.findAll(fixed)
+        clean(QUOTED.findAll(fixed)
             .map { it.groupValues[1].trim() }
             .filter { it.isNotEmpty() && !it.startsWith("{") }
-            .toList()
-            .let { if (it.isNotEmpty()) return pad(it) }
+            .toList())
+            .let { if (it.isNotEmpty()) return it }
 
-        // 4. Last resort: one reply per line, stripped of list/quote furniture.
-        val lines = fixed.split("\n")
-            .map { it.trim().trim('-', '*', '1', '2', '3', '.', ' ', '"', '\'', '[', ']', '{', '}') }
+        // 4. Last resort: split on the separators a model uses when it ignores
+        //    the JSON request entirely — newlines, and the Chinese list
+        //    separators / full-width numbering that broke the old line-only
+        //    version (it returned the whole "甲；乙；丙" blob as one reply).
+        val parts = fixed.split("\n", "；", ";", "  ", "\u3001")
+            .map { stripListFurniture(it) }
             .filter { it.isNotBlank() }
-        return pad(lines)
+        return clean(parts)
     }
 
-    /** Pad/truncate to exactly 3, so the rank question always has 3 candidates. */
-    private fun pad(items: List<String>): List<String> {
-        val out = items.map { tidy(it) }.filter { it.isNotEmpty() }.take(3).toMutableList()
-        while (out.size < 3) out.add("（稍等，我看下）")
-        return out
+    /**
+     * Remove list numbering from one line: `1.` `2、` `3)` `-` `*` etc., plus
+     * stray wrapping brackets and quotes. The old code used `trim(...)` with a
+     * character set, which also ate meaningful leading characters and left a
+     * bare "、" behind on full-width numbering.
+     */
+    private fun stripListFurniture(line: String): String {
+        var t = line.trim()
+        t = LEAD_INDEX.replace(t, "")
+        t = t.trim().trimStart('-', '*', '\u2022', ' ', '\t')
+        t = t.trim('[', ']', '{', '}', '"', '\'', '\u201c', '\u201d')
+        return t.trim()
+    }
+
+    /** Drop blanks, de-duplicate, keep the first 3 in model order. */
+    private fun clean(items: List<String>): List<String> {
+        val seen = LinkedHashSet<String>()
+        for (raw in items) {
+            val t = tidy(raw)
+            if (t.isNotEmpty()) seen.add(t)
+            if (seen.size == 3) break
+        }
+        return seen.toList()
     }
 
     /**
@@ -230,5 +348,12 @@ class ReplyClient(private val prefs: Prefs) {
 
         /** `"..."` / `“...”` / `'...'` runs of real content. */
         private val QUOTED = Regex("""["“”']([^"“”']{2,})["“”']""")
+
+        /**
+         * Leading list numbering: `1.` `2、` `3)` `1、` etc. Handles half- and
+         * full-width delimiters, which is what the old `trim('-','*','1'…)`
+         * approach mangled (it ate any leading 1/2/3 and left the "、" behind).
+         */
+        private val LEAD_INDEX = Regex("""^\s*\d{1,2}\s*[.、)）:：]\s*""")
     }
 }

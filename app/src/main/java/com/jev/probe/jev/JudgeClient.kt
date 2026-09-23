@@ -23,12 +23,17 @@ class JudgeClient(private val prefs: Prefs) {
      * @param ctx D-stage knowledge context; null or empty means the request body
      *        is byte-for-byte what v1.2 sent.
      */
-    fun judge(snapshot: ChatSnapshot, relationship: String, ctx: ChatContext? = null): Analysis {
+    fun judge(
+        snapshot: ChatSnapshot,
+        relationship: String,
+        ctx: ChatContext? = null,
+        target: String? = null
+    ): Analysis {
         val start = System.currentTimeMillis()
-        return try {
+        try {
             val answers = postDecisions(
                 snapshot, relationship, ctx,
-                JevQuestions.judge()
+                JevQuestions.judge(group = snapshot.groupLike, focusSpeaker = target)
             )
             Analysis(
                 trueIntent = parseChoice(answers.optJSONObject("true_intent")),
@@ -48,15 +53,28 @@ class JudgeClient(private val prefs: Prefs) {
         }
     }
 
-    /** Ask Jev which of the candidate replies is best; throws on failure. */
+    /**
+     * Ask Jev which of the candidate replies is best; throws on failure.
+     *
+     * Ranking needs exactly 3 candidates ([JevQuestions.rankQuestion] requires
+     * it). When fewer real ones came back, the caller gets them unranked
+     * (prob = null) instead of a fabricated ordering — the previous behaviour
+     * padded with placeholder text and let Jev rank the placeholders first,
+     * which is how "（稍等，我看下）" ended up as the top suggestion.
+     */
     fun rank(
         snapshot: ChatSnapshot,
         relationship: String,
         candidates: List<String>,
-        ctx: ChatContext? = null
+        ctx: ChatContext? = null,
+        target: String? = null
     ): List<RankedReply> {
+        if (candidates.size != 3) {
+            return candidates.map { RankedReply(it, null) }
+        }
         val questions = JSONObject().put("best_reply",
-            JevQuestions.rankQuestion(candidates).getJSONObject("best_reply"))
+            JevQuestions.rankQuestion(candidates, snapshot = snapshot, focusSpeaker = target)
+                .getJSONObject("best_reply"))
         val answers = postDecisions(snapshot, relationship, ctx, questions)
         return parseRanked(answers.optJSONObject("best_reply"), candidates)
     }
@@ -119,9 +137,14 @@ class JudgeClient(private val prefs: Prefs) {
         val keys = listOf("reply_a", "reply_b", "reply_c")
         val probs = o?.optJSONObject("probabilities")
         val list = candidates.mapIndexed { i, text ->
-            RankedReply(text, probs?.optDouble(keys.getOrElse(i) { "" }, 0.0) ?: 0.0)
+            // A key Jev did not return stays null rather than defaulting to 0.0:
+            // a reply it never scored must not be shown as "0%" (indistinguishable
+            // from a real low score).
+            val key = keys.getOrElse(i) { "" }
+            val p = if (probs != null && probs.has(key)) probs.optDouble(key) else null
+            RankedReply(text, p)
         }
-        return list.sortedByDescending { it.prob }
+        return list.sortedByDescending { it.prob ?: -1.0 }
     }
 
     companion object { private const val TAG = "JEVASSIST" }

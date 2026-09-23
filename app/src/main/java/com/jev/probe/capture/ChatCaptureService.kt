@@ -245,12 +245,16 @@ open class ChatCaptureService : AccessibilityService() {
         if (analyzing) return
         if (!prefs.hasKey()) { main.post { overlay?.showError("未设置判断接口密钥，去设置里填") }; return }
         analyzing = true
+        val client = JevClient(prefs)
+        // Who the drafts are for. In a group this is the pinned member or
+        // whoever spoke last; in a 1:1 it is null and every prompt stays
+        // exactly as it was before group support existed.
+        val target = client.resolveTarget(snapshot)
         main.post {
             overlay?.showLoading()
             overlay?.setNote(snapshot.note)
-            overlay?.setConversation(snapshot.title, snapshot.messages)
+            overlay?.setConversation(snapshot.title, snapshot.messages, snapshot.groupLike, target)
         }
-        val client = JevClient(prefs)
         val rel = prefs.relationship
         val pkg = activePkg ?: ""
         // Knowledge context first (local file reads only, a few ms), then the two
@@ -266,7 +270,7 @@ open class ChatCaptureService : AccessibilityService() {
 
             // Judgment is fast (~1s) — show it immediately.
             submit {
-                val judgment = client.judge(snapshot, rel, ctx)
+                val judgment = client.judge(snapshot, rel, ctx, target)
                 main.post {
                     if (judgment.error != null) { analyzing = false; overlay?.showError(judgment.error) }
                     else overlay?.showJudgment(judgment)
@@ -275,7 +279,7 @@ open class ChatCaptureService : AccessibilityService() {
             // Candidate replies are slower (generative + rank) — fill in when ready.
             submit {
                 var replyError: String? = null
-                val ranked = try { client.draftAndRank(snapshot, rel, ctx) } catch (e: Exception) {
+                val ranked = try { client.draftAndRank(snapshot, rel, ctx, target) } catch (e: Exception) {
                     replyError = e.message ?: e.javaClass.simpleName
                     emptyList()
                 }
@@ -471,6 +475,7 @@ open class ChatCaptureService : AccessibilityService() {
             runAnalysis()
         } else {
             overlay?.setNote(snapshot.note)
+            // OCR cannot tell who said what, so no group inference here.
             overlay?.setConversation(snapshot.title, snapshot.messages)
             overlay?.showIdle(snapshot.title)
         }

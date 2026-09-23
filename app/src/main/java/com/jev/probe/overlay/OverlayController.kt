@@ -71,6 +71,10 @@ class OverlayController(private val ctx: Context) {
     private var conversation: List<Msg> = emptyList()
     private var conversationTitle: String? = null
 
+    /** Whether the conversation on screen is a group, and who the reply is for. */
+    private var isGroup = false
+    private var groupTarget: String? = null
+
     /** Whether the overlay window is currently on screen. */
     fun isShowing(): Boolean = root != null
 
@@ -160,13 +164,16 @@ class OverlayController(private val ctx: Context) {
     }
 
     private fun buildPanel(): LinearLayout {
+        // The panel is a vertical column: header, scrolling content, and a
+        // bottom-right resize grip. Only the grip is the touch target, so
+        // dragging inside the content still scrolls normally.
         val p = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             visibility = View.GONE
             background = card(18, panelBg(), stroke = true)
             elevation = dp(8).toFloat()
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-            layoutParams = FrameLayout.LayoutParams(dp(316), FrameLayout.LayoutParams.WRAP_CONTENT).apply {
+            setPadding(dp(14), dp(12), dp(14), dp(8))
+            layoutParams = FrameLayout.LayoutParams(panelW(), panelH()).apply {
                 topMargin = dp(56) // sit just below the bubble
             }
         }
@@ -183,17 +190,89 @@ class OverlayController(private val ctx: Context) {
 
         val scroll = ScrollView(ctx).apply {
             isVerticalScrollBarEnabled = false
-            // Cap the height so the panel stays in the upper area and does not
-            // cover the WeChat input box / keyboard. Scroll inside if taller.
+            // Fills whatever height the panel currently has; the grip resizes
+            // the panel itself, and this scrolls inside it.
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, (screenH * 0.40f).roundToInt()).apply { topMargin = dp(6) }
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = dp(6) }
         }
         val content = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         scroll.addView(content)
         p.addView(scroll)
+        p.addView(buildResizeGrip(p))
         contentBox = content
         panel = p
         return p
+    }
+
+    /**
+     * The bottom-right grip. Dragging it resizes the panel and the size is
+     * saved, so the user's preferred shape survives the next analysis and the
+     * next launch (the old panel was a fixed 316dp × 40% of screen, which is
+     * why long candidate replies had to be scrolled inside a small box).
+     */
+    private fun buildResizeGrip(p: LinearLayout): View {
+        val grip = TextView(ctx).apply {
+            text = "◢"
+            setTextColor(Color.parseColor("#9CA3AF"))
+            textSize = 14f
+            gravity = Gravity.CENTER
+            setPadding(dp(8), 0, 0, 0)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(22))
+        }
+        var startW = 0
+        var startH = 0
+        var downX = 0f
+        var downY = 0f
+        var dragging = false
+        grip.setOnTouchListener { _, e ->
+            val lp = p.layoutParams as? FrameLayout.LayoutParams
+            when (e.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    if (lp == null) return@setOnTouchListener false
+                    startW = lp.width; startH = lp.height
+                    downX = e.rawX; downY = e.rawY
+                    dragging = false
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (lp == null) return@setOnTouchListener false
+                    val dx = (e.rawX - downX).toInt()
+                    val dy = (e.rawY - downY).toInt()
+                    if (abs(dx) > dp(4) || abs(dy) > dp(4)) dragging = true
+                    // Keep it usable: at least 200x160dp, never off-screen.
+                    lp.width = (startW + dx).coerceIn(dp(200), screenW - dp(12))
+                    lp.height = (startH + dy).coerceIn(dp(160), (screenH * 0.85f).toInt())
+                    p.layoutParams = lp
+                    root?.let { runCatching { wm.updateViewLayout(it, lp) } }
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (dragging && lp != null) {
+                        prefs.panelWidth = lp.width
+                        prefs.panelHeight = lp.height
+                        toast("已记住面板大小")
+                    }
+                    dragging
+                }
+                else -> false
+            }
+        }
+        return grip
+    }
+
+    /** Saved panel width, or the built-in default (316dp), clamped to screen. */
+    private fun panelW(): Int {
+        val saved = prefs.panelWidth
+        val def = dp(316)
+        return if (saved > 0) saved.coerceIn(dp(200), screenW - dp(12)) else def
+    }
+
+    /** Saved panel height, or the built-in default (40% of screen). */
+    private fun panelH(): Int {
+        val saved = prefs.panelHeight
+        val def = (screenH * 0.40f).roundToInt()
+        return if (saved > 0) saved.coerceIn(dp(160), (screenH * 0.85f).toInt()) else def
     }
 
     private fun iconBtn(glyph: String, onClick: () -> Unit) = TextView(ctx).apply {
@@ -324,6 +403,8 @@ class OverlayController(private val ctx: Context) {
         // messages above its analysis.
         conversation = emptyList()
         conversationTitle = null
+        isGroup = false
+        groupTarget = null
         contentBox?.removeAllViews()
     }
 
@@ -359,10 +440,20 @@ class OverlayController(private val ctx: Context) {
      * Record which messages this analysis is based on (the last few bubbles of
      * the open conversation). Shown as a 「目前对话」 block so the user can see
      * exactly what Jev was looking at.
+     *
+     * @param group whether this is a multi-party chat (drives speaker labels).
+     * @param target the member the drafts are addressed to, for the ▸ marker.
      */
-    fun setConversation(title: String?, messages: List<Msg>) {
+    fun setConversation(
+        title: String?,
+        messages: List<Msg>,
+        group: Boolean = false,
+        target: String? = null
+    ) {
         conversationTitle = title
         conversation = messages.takeLast(CONVERSATION_SHOWN)
+        isGroup = group
+        groupTarget = target
     }
 
     /**
@@ -445,17 +536,22 @@ class OverlayController(private val ctx: Context) {
         a.tensionResolved?.let { if (it >= 0.7) views.add(line("✓ 紧张已缓解", "#16A34A", 12f)) }
 
         views.add(divider())
-        views.add(line("候选回复（Jev 排序）", "#9CA3AF", 12f))
+        val ranked = a.rankedReplies.any { it.prob != null }
+        views.add(line(if (ranked) "候选回复（Jev 排序）" else "候选回复", "#9CA3AF", 12f))
         if (generating) {
             views.add(hint("生成中…"))
         } else {
             val fill = lastFill ?: {}
             a.rankedReplies.forEachIndexed { i, r ->
-                views.add(replyCard(i + 1, r.text, (r.prob * 100).roundToInt(), fill))
+                views.add(replyCard(i + 1, r.text, r.prob?.let { (it * 100).roundToInt() }, fill))
             }
             if (a.rankedReplies.isEmpty()) {
                 val msg = replyError?.let { "回复接口出错：$it" } ?: "（未生成候选回复）"
                 views.add(hint(msg))
+            } else if (a.rankedReplies.size < 3) {
+                // Say so instead of silently showing fewer: this used to be
+                // papered over with placeholder text that then ranked first.
+                views.add(hint("只生成出 ${a.rankedReplies.size} 条（点「重新分析」可再试一次）"))
             }
         }
         views.add(reAnalyzeBtn())
@@ -507,12 +603,27 @@ class OverlayController(private val ctx: Context) {
                 orientation = LinearLayout.HORIZONTAL
                 setPadding(0, dp(1), 0, dp(1))
             }
+            // In a group, name the actual speaker; "对方" is meaningless when
+            // five people are talking, and it is what made the panel confusing.
+            val who = when {
+                m.side == "me" -> "我"
+                !m.speaker.isNullOrBlank() -> m.speaker
+                else -> "对方"
+            }
+            val isTarget = !m.speaker.isNullOrBlank() && m.speaker == groupTarget
             row.addView(TextView(ctx).apply {
-                text = if (m.side == "me") "我" else "对方"
-                setTextColor(Color.parseColor(if (m.side == "me") "#3A7AFE" else "#D97706"))
+                text = if (isTarget) "$who▸" else who
+                setTextColor(Color.parseColor(
+                    when {
+                        m.side == "me" -> "#3A7AFE"
+                        isTarget -> "#7C3AED"
+                        else -> "#D97706"
+                    }))
                 textSize = 11f
                 setTypeface(typeface, Typeface.BOLD)
-                minWidth = dp(34)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(dp(64), ViewGroup.LayoutParams.WRAP_CONTENT)
             })
             row.addView(TextView(ctx).apply {
                 text = m.text
@@ -528,8 +639,18 @@ class OverlayController(private val ctx: Context) {
         }
         out.add(box)
         // Name the bubble the judgment is about, so "对方真实意图" below is unambiguous.
-        out.add(hint("↑ 最新一条（${if (conversation.last().side == "me") "我" else "对方"}）" +
-            "就是下面判断针对的那句"))
+        val lastMsg = conversation.last()
+        val lastWho = when {
+            lastMsg.side == "me" -> "我"
+            !lastMsg.speaker.isNullOrBlank() -> lastMsg.speaker
+            else -> "对方"
+        }
+        out.add(hint("↑ 最新一条（$lastWho）就是下面判断针对的那句"))
+        if (isGroup) {
+            val to = groupTarget?.takeIf { it.isNotBlank() }
+            out.add(hint(if (to != null) "群聊模式 · 候选回复是给「$to」的（标▸的是他/她）"
+            else "群聊模式 · 候选回复是给最后发言的人的"))
+        }
         return out
     }
 
@@ -551,8 +672,8 @@ class OverlayController(private val ctx: Context) {
         return row
     }
 
-    private fun replyCard(rank: Int, text: String, pct: Int, onFill: (String) -> Unit): View {
-        val top = rank == 1
+    private fun replyCard(rank: Int, text: String, pct: Int?, onFill: (String) -> Unit): View {
+        val top = rank == 1 && pct != null
         val cardBg = if (top) Color.parseColor("#EAF1FF") else Color.parseColor("#F3F4F6")
         val c = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
@@ -563,7 +684,11 @@ class OverlayController(private val ctx: Context) {
             ).apply { topMargin = dp(6) }
         }
         c.addView(TextView(ctx).apply {
-            this.text = "#$rank · ${pct}%"; setTextColor(Color.parseColor("#3A7AFE")); textSize = 11f
+            // No percentage when Jev never ranked these (fewer than 3 real
+            // candidates) — printing a fake number is what made the panel
+            // untrustworthy in the first place.
+            this.text = if (pct != null) "#$rank · $pct%" else "#$rank · 未排序"
+            setTextColor(Color.parseColor("#3A7AFE")); textSize = 11f
             setTypeface(typeface, Typeface.BOLD)
         })
         c.addView(TextView(ctx).apply {

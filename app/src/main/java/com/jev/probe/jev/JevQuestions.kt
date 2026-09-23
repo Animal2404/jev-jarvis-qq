@@ -21,26 +21,71 @@ object JevQuestions {
     const val BACKGROUND_NOTE =
         " Facts given in background are provided context, not off-topic."
 
-    private fun noul(instructions: String, t: String, f: String) = JSONObject().apply {
-        put("type", "noul")
-        put("instructions", instructions + BACKGROUND_NOTE)
-        put("criteria", JSONObject().put("true", t).put("false", f))
+    /**
+     * Appended when the capture looks like a group chat. Without it every
+     * question's "the other person" silently collapses several participants
+     * into one, so the judgment describes a person who does not exist (the
+     * group-chat confusion the user reported). The state carries
+     * `chat.is_group` / `chat.latest_speaker`; this tells the model to use them.
+     */
+    const val GROUP_NOTE =
+        " IMPORTANT: this is a multi-party group chat (state.chat.is_group is true)." +
+            " Every message carries a `speaker` nickname; messages with speaker names" +
+            " other than the latest one are other members, not the same person." +
+            " Judge the intent of state.chat.latest_speaker ONLY — the one who sent the" +
+            " latest message — and never attribute an earlier member's words to them." +
+            " Group banter and jokes are not relationship conflict; do not read a" +
+            " couple-style emotional test into ordinary group chatter."
+
+    /**
+     * The trailing note for one question set. Group captures get BACKGROUND_NOTE
+     * plus GROUP_NOTE; 1:1 captures keep exactly the wording that passed
+     * calibration, with no group language to confuse the judgment.
+     */
+    private fun noteFor(group: Boolean): String =
+        if (group) BACKGROUND_NOTE + GROUP_NOTE else BACKGROUND_NOTE
+
+    /**
+     * Name the person the judgment must be about, when the user pinned one.
+     * In a group the "latest message" and the person you actually want to
+     * answer can differ (someone else posted after them), so saying it outright
+     * beats hoping the model infers it.
+     */
+    private fun focusNote(focusSpeaker: String?): String {
+        val s = focusSpeaker?.trim().orEmpty()
+        if (s.isEmpty()) return ""
+        return " The user wants the judgment to be about the group member named" +
+            " \"$s\" — read that member's own messages, not the room's mood in general."
     }
 
-    private fun choice(instructions: String, criteria: Map<String, String>) = JSONObject().apply {
-        put("type", "choice")
-        put("instructions", instructions + BACKGROUND_NOTE)
-        put("criteria", JSONObject().also { c -> criteria.forEach { (k, v) -> c.put(k, v) } })
-    }
+    private fun noul(instructions: String, t: String, f: String, note: String = BACKGROUND_NOTE) =
+        JSONObject().apply {
+            put("type", "noul")
+            put("instructions", instructions + note)
+            put("criteria", JSONObject().put("true", t).put("false", f))
+        }
 
-    private fun score(instructions: String, levels: List<String>) = JSONObject().apply {
-        put("type", "score")
-        put("instructions", instructions + BACKGROUND_NOTE)
-        put("criteria", JSONArray().also { a -> levels.forEach { a.put(it) } })
-    }
+    private fun choice(instructions: String, criteria: Map<String, String>, note: String = BACKGROUND_NOTE) =
+        JSONObject().apply {
+            put("type", "choice")
+            put("instructions", instructions + note)
+            put("criteria", JSONObject().also { c -> criteria.forEach { (k, v) -> c.put(k, v) } })
+        }
 
-    /** The 7 judgment questions. Returns a fresh JSONObject each call. */
-    fun judge(): JSONObject = JSONObject().apply {
+    private fun score(instructions: String, levels: List<String>, note: String = BACKGROUND_NOTE) =
+        JSONObject().apply {
+            put("type", "score")
+            put("instructions", instructions + note)
+            put("criteria", JSONArray().also { a -> levels.forEach { a.put(it) } })
+        }
+
+    /** The 7 judgment questions. Returns a fresh JSONObject each call.
+     *
+     * @param group read the room as multi-party (see [GROUP_NOTE]).
+     * @param focusSpeaker in a group, the nickname this judgment is about
+     *        (blank = whoever sent the latest message). */
+    fun judge(group: Boolean = false, focusSpeaker: String? = null): JSONObject = JSONObject().apply {
+        val note = noteFor(group) + focusNote(focusSpeaker)
         put("literal_question", noul(
             "Is the other person's latest message meant purely literally, with no subtext? " +
                 "Judge from the whole thread, not one sentence in isolation.",
@@ -49,7 +94,7 @@ object JevQuestions {
             "There is subtext: a test of whether you remember or care, sarcasm, " +
                 "an implied complaint, a hint they will not say outright, a trap question, " +
                 "an accusation dressed as a question, or a cold/short line that really means blame."
-        ))
+        ), note)
         put("true_intent", choice(
             "What is the other person's true intent in the latest message, given the full conversation? " +
                 "Prefer tone and context over surface wording. " +
@@ -75,7 +120,7 @@ object JevQuestions {
                     "or clearly signaled they need nothing more. " +
                     "Not a breakup, not 'don't contact me', not sarcastic 'I'm used to it'.")
             )
-        ))
+        ), note)
         put("danger_level", score(
             "How close is this conversation to a fight or to hurting the relationship? " +
                 "Match the current scene. " +
@@ -97,7 +142,7 @@ object JevQuestions {
                     "break up if you forget again, report you tonight, or stop working together if you miss this.",
                 "Active rupture: they said it is over, told you not to reply, deleted you, or are exploding."
             )
-        ))
+        ), note)
         put("should_reply_now", noul(
             "Should your next message contain substantive content? " +
                 "Substantive means: admitting a specific known fault, giving a concrete time/plan/deliverable, " +
@@ -112,7 +157,7 @@ object JevQuestions {
             "Do not put substance in the next message: the recalled content is not in this snippet, " +
                 "they are testing whether you remember, a holding line is enough, " +
                 "saying less is safer, or they already closed the topic."
-        ))
+        ), note)
         put("best_action", choice(
             "What type of next action is best? Do not decide whether to send a message immediately. " +
                 "Ignore timing. Choose only the action type. " +
@@ -133,7 +178,7 @@ object JevQuestions {
                 "make_plan" to ("Propose or confirm logistics (time, place, task) for a non-conflict request " +
                     "such as a meal or a meeting.")
             )
-        ))
+        ), note)
         put("she_needs", choice(
             "What does the other person need from you right now? Judge the LATEST message first. " +
                 "If they genuinely accepted (thanks / got it / 没事了 / 那就这样 / 收到了 / 过去了), " +
@@ -153,7 +198,7 @@ object JevQuestions {
                     "warm casual chat with no ask, or a rupture where they told you not to reply. " +
                     "Not sarcasm pretending to be fine.")
             )
-        ))
+        ), note)
         put("tension_resolved", noul(
             "Has interpersonal tension already been resolved? " +
                 "Answer true only if there was never tension, or the other person has clearly accepted, " +
@@ -163,7 +208,7 @@ object JevQuestions {
                 "confirmed a happy plan, or the chat was never tense.",
             "Tension is still present: they are waiting, testing, angry, sarcastic, " +
                 "issuing an ultimatum, or the issue is open."
-        ))
+        ), note)
     }
 
     /**
@@ -186,12 +231,24 @@ object JevQuestions {
         val msgs = JSONArray()
         val last10 = snapshot.messages.takeLast(10)
         for (m in last10) {
-            msgs.put(JSONObject().put("from", m.side).put("text", m.text))
+            val o = JSONObject().put("from", m.side).put("text", m.text)
+            // In a group every non-me bubble has side "other", so without the
+            // nickname Jev would read five different people as one person and
+            // judge "their" intent as if it were a single thread.
+            m.speaker?.takeIf { it.isNotBlank() }?.let { o.put("speaker", it) }
+            msgs.put(o)
         }
         val chat = JSONObject()
             .put("relationship", relationship)
             .put("messages", msgs)
             .put("latest_from", last10.lastOrNull()?.side ?: "other")
+        val latestSpeaker = last10.lastOrNull()?.speaker
+        if (!latestSpeaker.isNullOrBlank()) chat.put("latest_speaker", latestSpeaker)
+        // Tells the judgment questions to read this as a room, not a dialogue.
+        if (snapshot.groupLike) {
+            chat.put("is_group", true)
+            chat.put("group_name", snapshot.title.orEmpty())
+        }
         val state = JSONObject().put("chat", chat)
         if (background.isNotBlank()) state.put("background", background)
         if (history.isNotEmpty()) {
@@ -202,21 +259,45 @@ object JevQuestions {
         return state
     }
 
-    /** The best_reply ranking question over exactly 3 candidates (Chinese text kept). */
-    fun rankQuestion(candidates: List<String>): JSONObject {
+    /**
+     * The best_reply ranking question over exactly 3 candidates (Chinese text
+     * kept). Group captures get wording that judges "fits this room" instead of
+     * "fits this relationship" — a reply that is right for a couple is often
+     * absurd in a group, which is what made rankings look wrong there.
+     */
+    fun rankQuestion(
+        candidates: List<String>,
+        snapshot: ChatSnapshot? = null,
+        focusSpeaker: String? = null
+    ): JSONObject {
         require(candidates.size == 3) { "rankQuestion expects exactly 3 candidates" }
         val keys = listOf("reply_a", "reply_b", "reply_c")
         val criteria = JSONObject()
         keys.forEachIndexed { i, k -> criteria.put(k, candidates[i]) }
+        val group = snapshot?.groupLike == true
+        val instructions = buildString {
+            if (group) {
+                append("Which candidate reply is the most appropriate next message in this group chat, ")
+                append("given what the room is talking about right now? ")
+                val to = focusSpeaker?.takeIf { it.isNotBlank() }
+                if (to != null) append("The reply is aimed at group member \"$to\"; ")
+                append("prefer one that lands naturally in a group — short, on-topic, not overly intimate, ")
+                append("not a monologue. ")
+                append("Penalize replies that read like a private couple's message, that over-promise, ")
+                append("that are dismissive, or that answer a different member than the one addressed.")
+            } else {
+                append("Which candidate reply is the most appropriate next message, ")
+                append("given the conversation and the other person's true need? ")
+                append("Prefer a reply that matches the best action type. ")
+                append("Penalize dismissive, over-promising, or off-topic replies. ")
+                append("If the facts are not yet confirmed, prefer the candidate that looks them up ")
+                append("instead of faking memory or a vague apology.")
+            }
+            append(noteFor(group))
+        }
         val q = JSONObject().apply {
             put("type", "choice")
-            put("instructions",
-                "Which candidate reply is the most appropriate next message, " +
-                    "given the conversation and the other person's true need? " +
-                    "Prefer a reply that matches the best action type. " +
-                    "Penalize dismissive, over-promising, or off-topic replies. " +
-                    "If the facts are not yet confirmed, prefer the candidate that looks them up " +
-                    "instead of faking memory or a vague apology." + BACKGROUND_NOTE)
+            put("instructions", instructions)
             put("criteria", criteria)
         }
         return JSONObject().put("best_reply", q)

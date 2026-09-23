@@ -81,6 +81,59 @@ private val WECHAT_TITLE_EXCLUDE_PUNCT = Regex("""[，。？！、]""")
 private val WECHAT_GROUP_COUNT_SUFFIX = Regex("""[（(]\d+[）)]""")
 
 /**
+ * The sender nickname of a WeChat bubble, or null.
+ *
+ * WeChat hides node ids from ordinary services, so there is no documented
+ * nickname id to read (QQ has one: `id/mjq`). This is a bounded geometric
+ * guess instead: climb a few parents to reach the row container, then look for
+ * a short, left-aligned, non-sentence text line sitting just above the bubble.
+ *
+ * Failure is SAFE by design: returning null simply leaves the snapshot without
+ * speaker names, `groupLike` then stays false, and the whole pipeline behaves
+ * exactly as the 1:1 path did before this change. An unverified heuristic must
+ * never be able to make things worse than not having it.
+ */
+private fun findWeChatSpeakerAbove(bubble: AccessibilityNodeInfo): String? {
+    val bb = Rect(); bubble.getBoundsInScreen(bb)
+    var container: AccessibilityNodeInfo? = bubble
+    // The nickname is a sibling of the bubble in the same row container.
+    repeat(3) {
+        container = container?.parent ?: return null
+        val found = closestSpeakerIn(container!!, bb)
+        if (found != null) return found
+    }
+    return null
+}
+
+/** Short text just above [bb] and hugging its left edge, if any. */
+private fun closestSpeakerIn(container: AccessibilityNodeInfo, bb: Rect): String? {
+    val stack = ArrayDeque<AccessibilityNodeInfo>()
+    stack.addLast(container)
+    var best: String? = null
+    var bestGap = Int.MAX_VALUE
+    var guard = 0
+    while (stack.isNotEmpty() && guard < 400) {
+        guard++
+        val node = stack.removeLast()
+        val text = node.text?.toString()?.trim()
+        if (!text.isNullOrBlank() && text.length <= 20 &&
+            !looksLikeTimestamp(text) && !WECHAT_TITLE_EXCLUDE_PUNCT.containsMatchIn(text)
+        ) {
+            val r = Rect(); node.getBoundsInScreen(r)
+            val gap = bb.top - r.bottom
+            // Just above the bubble (not the whole screen away), and starting
+            // in the bubble's left third — a nickname, not a centred title or a
+            // right-aligned "read" marker.
+            if (gap in 0..48 && r.left <= bb.left + (bb.width() / 3)) {
+                if (gap < bestGap) { bestGap = gap; best = text }
+            }
+        }
+        for (i in node.childCount - 1 downTo 0) node.getChild(i)?.let { stack.addLast(it) }
+    }
+    return best
+}
+
+/**
  * WeChat conversation title (v1.3 fix): a group's pinned announcement or a
  * stray message can sit in the same "topmost, short, centered" search
  * [findTitleInActionBar] does and get mistaken for the title (seen picking up
@@ -141,7 +194,7 @@ class WeChatAdapter : ChatAppAdapter {
 
     override fun extract(root: AccessibilityNodeInfo, res: Resources): ChatSnapshot? {
         val width = res.displayMetrics.widthPixels
-        val bubbles = ArrayList<Triple<Int, Int, String>>() // top, centerX, text
+        val bubbles = ArrayList<Bubble5>() // top, centerX, text, speaker, groupish
         var firstBubbleTop = Int.MAX_VALUE
         var isChat = false
 
@@ -157,7 +210,11 @@ class WeChatAdapter : ChatAppAdapter {
                 isChat = true
                 if (!text.isNullOrBlank()) {
                     val b = Rect(); node.getBoundsInScreen(b)
-                    bubbles.add(Triple(b.top, b.centerX(), text))
+                    // A group bubble carries the sender's nickname just above
+                    // it; a 1:1 bubble has no such line. Read it now, while the
+                    // subtree is in hand, so group judgment can name who spoke.
+                    val speaker = findWeChatSpeakerAbove(node)
+                    bubbles.add(Bubble5(b.top, b.centerX(), text, speaker, speaker != null))
                     if (b.top < firstBubbleTop) firstBubbleTop = b.top
                 }
             }
@@ -166,12 +223,25 @@ class WeChatAdapter : ChatAppAdapter {
         val title = findWeChatTitle(root, firstBubbleTop, width, res)
         // In a chat but nothing readable → empty snapshot, the OCR fallback cue.
         if (bubbles.isEmpty()) return if (isChat) ChatSnapshot(title, emptyList()) else null
-        bubbles.sortBy { it.first }
-        val msgs = bubbles.map { (_, cx, text) ->
-            Msg(if (cx > width / 2) "me" else "other", text)
+        bubbles.sortBy { it.top }
+        val msgs = bubbles.map { b ->
+            Msg(
+                if (b.centerX > width / 2) "me" else "other",
+                b.text,
+                // Only my own bubbles have no nickname, so never label them.
+                if (b.centerX > width / 2) null else b.speaker
+            )
         }
-        return ChatSnapshot(title, msgs)
+        return ChatSnapshot(title, msgs, isGroup = bubbles.any { it.groupish })
     }
+
+    private data class Bubble5(
+        val top: Int,
+        val centerX: Int,
+        val text: String,
+        val speaker: String?,
+        val groupish: Boolean
+    )
 
     companion object {
         private const val BUBBLE_ID = "com.tencent.mm:id/bkl"
@@ -199,8 +269,9 @@ class QQAdapter : ChatAppAdapter {
 
     override fun extract(root: AccessibilityNodeInfo, res: Resources): ChatSnapshot? {
         val width = res.displayMetrics.widthPixels
-        // top, left, right, text
+        // top, left, right, text, speaker
         val bubbles = ArrayList<Bubble>()
+        val nicknames = ArrayList<IntAndRect>()  // top, left, right, text
         var firstBubbleTop = Int.MAX_VALUE
         var title: String? = null
         var hasInput = false
@@ -215,8 +286,16 @@ class QQAdapter : ChatAppAdapter {
             val text = node.text?.toString()
             if (id == BUBBLE_ID && !text.isNullOrBlank()) {
                 val b = Rect(); node.getBoundsInScreen(b)
-                bubbles.add(Bubble(b.top, b.left, b.right, text))
+                bubbles.add(Bubble(b.top, b.left, b.right, text, null))
                 if (b.top < firstBubbleTop) firstBubbleTop = b.top
+            }
+            // QQ is not obfuscated, so the sender nickname has a real id
+            // (verified on QQ 9.3.50). Collected separately and attached to the
+            // bubble below it — in a group the nickname line sits on top of its
+            // own message, and in a 1:1 chat the id simply never appears.
+            if (id == NICKNAME_ID && !text.isNullOrBlank()) {
+                val r = Rect(); node.getBoundsInScreen(r)
+                nicknames.add(IntAndRect(r.top, r.left, r.right, text))
             }
             if (!hasInput && id == INPUT_ID) hasInput = true
             if (id == TITLE_ID && title == null) text?.let { if (it.isNotBlank()) title = it }
@@ -229,18 +308,40 @@ class QQAdapter : ChatAppAdapter {
 
         val avatarEdge = (width * 0.13).toInt()
         bubbles.sortBy { it.top }
-        val msgs = bubbles.map { b ->
+        // Attach each nickname to the nearest bubble starting below it.
+        val withSpeaker = bubbles.map { b ->
+            val nick = nicknames
+                .filter { it.top <= b.top && b.top - it.top < 120 }
+                .minByOrNull { b.top - it.top }
+            b.copy(speaker = nick?.text)
+        }
+        val msgs = withSpeaker.map { b ->
             val dl = kotlin.math.abs(b.left - avatarEdge)
             val dr = kotlin.math.abs((width - avatarEdge) - b.right)
-            Msg(if (dr < dl) "me" else "other", b.text)
+            val mine = dr < dl
+            Msg(if (mine) "me" else "other", b.text, if (mine) null else b.speaker)
         }
-        return ChatSnapshot(title, msgs)
+        // A nickname appearing on someone else's bubble is what proves this is a
+        // group; with no nicknames at all it is treated as 1:1 (QQ shows none
+        // in a private chat).
+        val group = withSpeaker.any { it.speaker != null }
+        return ChatSnapshot(title, msgs, isGroup = group)
     }
 
-    private data class Bubble(val top: Int, val left: Int, val right: Int, val text: String)
+    private data class Bubble(
+        val top: Int,
+        val left: Int,
+        val right: Int,
+        val text: String,
+        val speaker: String?
+    )
+
+    /** A nickname line: its own top position plus geometry, kept until matched. */
+    private data class IntAndRect(val top: Int, val left: Int, val right: Int, val text: String)
 
     companion object {
         private const val BUBBLE_ID = "com.tencent.mobileqq:id/mjn"
+        private const val NICKNAME_ID = "com.tencent.mobileqq:id/mjq"
         private const val TITLE_ID = "com.tencent.mobileqq:id/371"
         private const val INPUT_ID = "com.tencent.mobileqq:id/input"
     }
