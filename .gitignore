@@ -35,7 +35,18 @@ secrets.*
 # Prebuilt APK for direct install (tracked on purpose)
 !/apk/*.apk
 
-# Signing material never enters the repo
+# Signing material: normally never committed, with ONE deliberate exception.
+#
+# keystore/release.jks IS tracked. A sideloaded app can only be updated over an
+# existing install if the signature matches, and the CI builds used to fall back
+# to the debug key — which GitHub regenerates on every fresh runner, so every
+# release was signed differently and could not be installed over the previous
+# one. Committing a fixed keystore is what makes in-place updates possible.
+#
+# This is not a secret in any meaningful sense (its password is in
+# app/build.gradle.kts in plain sight); it provides signature stability, not
+# protection. Replace it with your own if you fork this.
 *.jks
 *.keystore
 keystore.properties
+!keystore/release.jks

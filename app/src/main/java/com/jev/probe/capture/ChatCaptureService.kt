@@ -55,6 +55,12 @@ open class ChatCaptureService : AccessibilityService() {
 
     private var lastSignature: String = ""
     private var activePkg: String? = null
+
+    /** Title of the conversation the current panel belongs to (see maybeCapture). */
+    private var lastTitle: String? = null
+
+    /** A round was requested while one was already running; run it after. */
+    private var rerunQueued = false
     private var analyzing = false
 
     /** Last known-good (non-transient) title per package. See [isTransientTitle]:
@@ -200,10 +206,22 @@ open class ChatCaptureService : AccessibilityService() {
         // Same content but the bubble is gone (killed by MIUI, or we left and came
         // back) → just put the bubble back, do NOT re-analyze (saves tokens/time).
         if (sig == lastSignature && !showing) { main.post { overlay?.showIdle(snapshot.title) }; return }
-        // Anything else reaching here is a genuinely different conversation (new
-        // app, or new content in this one) — a leftover judgment/candidates from
-        // whatever was shown before must not leak into it.
-        main.post { overlay?.resetForNewConversation() }
+
+        // Drop the previous judgment/candidates ONLY when this is a different
+        // conversation — a different app, or a different chat in the same app.
+        //
+        // This used to run on every new message, which is what made an already
+        // visible reply vanish the instant the other person (or anyone in a
+        // busy group) sent another line: reset wiped the panel, then the new
+        // analysis replaced it with "分析中…". Appending to the SAME thread must
+        // keep the existing panel on screen until the new result is ready.
+        val conversationChanged = pkg != activePkg ||
+            lastSignature.isEmpty() ||
+            (snapshot.title != null && snapshot.title != lastTitle)
+        if (conversationChanged) {
+            main.post { overlay?.resetForNewConversation() }
+        }
+        lastTitle = snapshot.title
         lastSignature = sig
         Log.d(TAG, "snapshot[$pkg] title=${snapshot.title} n=${snapshot.messages.size} " +
             snapshot.messages.takeLast(6).joinToString(" | ") { "${it.side}:${it.text.length}" }) // sides + lengths only, never content
@@ -216,7 +234,7 @@ open class ChatCaptureService : AccessibilityService() {
 
         pendingSnapshot = snapshot
         main.removeCallbacks(debounce)
-        main.postDelayed(debounce, 800) // debounce bursts of content-changed events
+        main.postDelayed(debounce, DEBOUNCE_MS)
     }
 
     /** A placeholder title an app shows only for a moment (e.g. X's "连接中…"
@@ -242,16 +260,30 @@ open class ChatCaptureService : AccessibilityService() {
 
     private fun runAnalysis() {
         val snapshot = pendingSnapshot ?: return
-        if (analyzing) return
         if (!prefs.hasKey()) { main.post { overlay?.showError("未设置判断接口密钥，去设置里填") }; return }
+
+        // Busy groups: a new analysis must not abandon the one in flight.
+        //
+        // Previously a second trigger returned immediately (`if (analyzing)
+        // return`) and the pending snapshot was left sitting there, while the
+        // first (now stale) round still owned the panel. The user saw the
+        // candidates vanish and nothing come back until they touched the chat
+        // again. Now the newest snapshot is simply remembered and re-run as soon
+        // as the current round finishes — a "latest wins" queue of depth 1.
+        if (analyzing) { rerunQueued = true; return }
+
         analyzing = true
+        rerunQueued = false
         val client = JevClient(prefs)
         // Who the drafts are for. In a group this is the pinned member or
         // whoever spoke last; in a 1:1 it is null and every prompt stays
         // exactly as it was before group support existed.
         val target = client.resolveTarget(snapshot)
         main.post {
-            overlay?.showLoading()
+            // Only show the "分析中…" placeholder when there is nothing worth
+            // keeping. An existing verdict + candidates stay on screen while the
+            // new round runs, so a fast-typing group no longer blanks the panel.
+            overlay?.beginAnalysis()
             overlay?.setNote(snapshot.note)
             overlay?.setConversation(snapshot.title, snapshot.messages, snapshot.groupLike, target)
         }
@@ -272,8 +304,12 @@ open class ChatCaptureService : AccessibilityService() {
             submit {
                 val judgment = client.judge(snapshot, rel, ctx, target)
                 main.post {
-                    if (judgment.error != null) { analyzing = false; overlay?.showError(judgment.error) }
-                    else overlay?.showJudgment(judgment)
+                    if (judgment.error != null) {
+                        // Keep whatever is already on screen unless nothing is.
+                        overlay?.showErrorIfEmpty(judgment.error)
+                    } else {
+                        overlay?.showJudgment(judgment)
+                    }
                 }
             }
             // Candidate replies are slower (generative + rank) — fill in when ready.
@@ -284,10 +320,20 @@ open class ChatCaptureService : AccessibilityService() {
                     emptyList()
                 }
                 main.post {
-                    analyzing = false
                     overlay?.showReplies(ranked, replyError) { text -> fillInput(text) }
+                    finishAnalysis()
                 }
             }
+        }
+    }
+
+    /** Clear the busy flag and immediately run a round that was skipped. */
+    private fun finishAnalysis() {
+        analyzing = false
+        if (rerunQueued && pendingSnapshot != null) {
+            rerunQueued = false
+            main.removeCallbacks(debounce)
+            main.postDelayed(debounce, RERUN_DELAY_MS)
         }
     }
 
@@ -579,6 +625,17 @@ open class ChatCaptureService : AccessibilityService() {
 
     companion object {
         private const val TAG = "JEVASSIST"
+
+        /**
+         * Quiet period before an analysis starts. Raised from 800ms: in a busy
+         * group, content-changed events fire almost continuously, so a short
+         * window meant every burst started (and discarded) a round. Waiting
+         * longer batches a whole flurry of messages into one analysis.
+         */
+        private const val DEBOUNCE_MS = 1500L
+
+        /** Gap before running a round that was queued while another was in flight. */
+        private const val RERUN_DELAY_MS = 400L
 
         /** Whole-screen OCR keeps the middle: no action bar, no input area. */
         private const val TOP_CROP = 0.12f

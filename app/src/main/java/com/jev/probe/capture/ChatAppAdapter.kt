@@ -2,6 +2,7 @@ package com.jev.probe.capture
 
 import android.content.res.Resources
 import android.graphics.Rect
+import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import com.jev.probe.core.BubbleRect
 import com.jev.probe.core.ChatSnapshot
@@ -272,6 +273,7 @@ class QQAdapter : ChatAppAdapter {
         // top, left, right, text, speaker
         val bubbles = ArrayList<Bubble>()
         val nicknames = ArrayList<IntAndRect>()  // top, left, right, text
+        val avatars = ArrayList<Rect>()          // candidate avatar boxes
         var firstBubbleTop = Int.MAX_VALUE
         var title: String? = null
         var hasInput = false
@@ -286,7 +288,7 @@ class QQAdapter : ChatAppAdapter {
             val text = node.text?.toString()
             if (id == BUBBLE_ID && !text.isNullOrBlank()) {
                 val b = Rect(); node.getBoundsInScreen(b)
-                bubbles.add(Bubble(b.top, b.left, b.right, text, null))
+                bubbles.add(Bubble(b.top, b.left, b.right, text, null, b.bottom))
                 if (b.top < firstBubbleTop) firstBubbleTop = b.top
             }
             // QQ is not obfuscated, so the sender nickname has a real id
@@ -296,6 +298,15 @@ class QQAdapter : ChatAppAdapter {
             if (id == NICKNAME_ID && !text.isNullOrBlank()) {
                 val r = Rect(); node.getBoundsInScreen(r)
                 nicknames.add(IntAndRect(r.top, r.left, r.right, text))
+            }
+            // Avatar candidates, collected in the SAME walk (no extra traversal):
+            // a picture node with no text and a roughly square, avatar-sized box.
+            // This is the signal the side decision is based on — an avatar is
+            // physically pinned to the outer edge of whoever sent the message,
+            // so it identifies the sender without any screen-metric guesswork.
+            if (text.isNullOrBlank()) {
+                val r = Rect(); node.getBoundsInScreen(r)
+                if (isAvatarShaped(r, res)) avatars.add(r)
             }
             if (!hasInput && id == INPUT_ID) hasInput = true
             if (id == TITLE_ID && title == null) text?.let { if (it.isNotBlank()) title = it }
@@ -322,22 +333,41 @@ class QQAdapter : ChatAppAdapter {
                 .minByOrNull { kotlin.math.abs(b.top - it.top) }
             b.copy(speaker = nick?.text)
         }
-        // Where a bubble sits when pinned to its own side. The old rule compared
-        // edges against the AVATAR COLUMN, but a bubble starts ~one avatar-width
-        // further in, so a correctly-pinned bubble still showed a ~110px
-        // "distance" while the opposite edge could beat it. That mislabeled long
-        // messages in both directions (reported: 唐天's long line shown as 我).
-        // Comparing against the bubble's own anchor makes the pinned edge match
-        // at ~0 for any message length.
-        val avatarW = (width * 0.092f).toInt()   // avatar is ~40dp at 1200px
+        // ---- side decision -------------------------------------------------
+        //
+        // Two earlier attempts compared the bubble's edges against guessed pixel
+        // columns (0.13 and 0.092 of screen width). Both were wrong on real
+        // devices for any message long enough to reach across the screen, and
+        // both depended on magic constants that a different resolution or QQ
+        // version invalidates.
+        //
+        // The reliable signal is the AVATAR: it is pinned to the outer edge of
+        // its own side (others' avatars on the left, mine on the right), and it
+        // travels with the message no matter how long that message is. So the
+        // side comes from the avatar's position relative to the bubble, and the
+        // pixel-column rule is only a last-resort fallback for trees that expose
+        // no avatar at all.
+        val avatarW = (width * 0.092f).toInt()
         val leftAnchor = avatarEdge + avatarW
         val rightAnchor = (width - avatarEdge) - avatarW
+        var usedAvatar = 0
         val msgs = withSpeaker.map { b ->
-            val dl = kotlin.math.abs(b.left - leftAnchor)
-            val dr = kotlin.math.abs(b.right - rightAnchor)
-            val mine = dr < dl
-            Msg(if (mine) "me" else "other", b.text, if (mine) null else b.speaker)
+            val byAvatar = sideFromAvatar(b, avatars)
+            val side = when {
+                byAvatar != null -> { usedAvatar++; byAvatar }
+                // No avatar in the tree: fall back to the nickname rule (a
+                // nickname means someone else, in a group), then to the edge
+                // heuristic as a last resort.
+                nicheck(b, withSpeaker) != null -> nicheck(b, withSpeaker)!!
+                else -> {
+                    val dl = kotlin.math.abs(b.left - leftAnchor)
+                    val dr = kotlin.math.abs(b.right - rightAnchor)
+                    if (dr < dl) "me" else "other"
+                }
+            }
+            Msg(side, b.text, if (side == "me") null else b.speaker)
         }
+        Log.d(TAG, "qq: ${msgs.size} bubbles, avatar-identified=$usedAvatar, avatars=${avatars.size}")
         // A nickname on someone else's bubble is what proves this is a group;
         // with no nicknames at all it is treated as 1:1 (QQ shows none in a
         // private chat).
@@ -345,18 +375,82 @@ class QQAdapter : ChatAppAdapter {
         return ChatSnapshot(title, msgs, isGroup = group)
     }
 
+    /**
+     * Which side sent this bubble, decided by its avatar.
+     *
+     * The avatar is pinned to the outer edge of whoever sent the message (other
+     * people's on the left, mine on the right), and it stays there no matter how
+     * long the message is — unlike the bubble's own edges, which a long message
+     * pushes across the screen. That is precisely why two earlier attempts based
+     * on guessed pixel columns (0.13 and 0.092 of screen width) mislabelled long
+     * messages, in both directions, and broke on other screen sizes.
+     *
+     * Picks the avatar candidate sharing the bubble's row and sitting in the gap
+     * beside it, then asks which side it landed on. Returns null when nothing
+     * matches, so the caller can fall back rather than guess.
+     */
+    private fun sideFromAvatar(b: Bubble, avatars: List<Rect>): String? {
+        val bubbleH = (b.bottom - b.top).coerceAtLeast(1)
+        val match = avatars
+            .filter { av ->
+                // Vertically part of the same row as the bubble.
+                val overlap = minOf(av.bottom, b.bottom) - maxOf(av.top, b.top)
+                if (overlap <= 0) return@filter false
+                if (overlap * 2 < minOf(av.height(), bubbleH)) return@filter false
+                // Horizontally beside the bubble (not overlapping its text).
+                val gapLeft = b.left - av.right
+                val gapRight = av.left - b.right
+                (gapLeft in -4..AVATAR_MAX_GAP) || (gapRight in -4..AVATAR_MAX_GAP)
+            }
+            .minByOrNull { kotlin.math.abs(it.centerY() - (b.top + bubbleH / 2)) }
+            ?: return null
+        return if (match.centerX() < b.left) "other" else "me"
+    }
+
+    /**
+     * In a QQ GROUP the sender's nickname is drawn above other people's messages
+     * and never above my own, so "has a nickname" is a direct statement about the
+     * sender that needs no geometry at all. Returns null when this is not a group
+     * (so the geometric fallback applies) — in a 1:1 chat no bubble has a
+     * nickname and this rule would otherwise call everything "me".
+     */
+    private fun nicheck(b: Bubble, all: List<Bubble>): String? {
+        if (all.none { it.speaker != null }) return null
+        return if (b.speaker != null) "other" else "me"
+    }
+
+    /**
+     * Is this box plausibly a chat avatar? Roughly square, and neither a tiny
+     * decoration nor a full-size posted photo. Deliberately generous — the
+     * row-adjacency test in [sideFromAvatar] rejects anything not actually
+     * beside a bubble, so a false positive here is harmless.
+     */
+    private fun isAvatarShaped(r: Rect, res: Resources): Boolean {
+        val w = r.width(); val h = r.height()
+        if (w <= 0 || h <= 0) return false
+        val longSide = maxOf(w, h); val shortSide = minOf(w, h)
+        if (longSide - shortSide > longSide * AVATAR_SQUARE_TOL) return false
+        val minPx = (AVATAR_MIN_DP * res.displayMetrics.density).toInt()
+        val maxPx = (AVATAR_MAX_DP * res.displayMetrics.density).toInt()
+        return shortSide >= minPx && longSide <= maxPx
+    }
+
     private data class Bubble(
         val top: Int,
         val left: Int,
         val right: Int,
         val text: String,
-        val speaker: String?
+        val speaker: String?,
+        /** Bottom edge; needed to match an avatar to the row it belongs to. */
+        val bottom: Int = top
     )
 
     /** A nickname line: its own top position plus geometry, kept until matched. */
     private data class IntAndRect(val top: Int, val left: Int, val right: Int, val text: String)
 
     companion object {
+        private const val TAG = "JEVASSIST"
+
         private const val BUBBLE_ID = "com.tencent.mobileqq:id/mjn"
         private const val NICKNAME_ID = "com.tencent.mobileqq:id/mjq"
         private const val TITLE_ID = "com.tencent.mobileqq:id/371"
@@ -365,6 +459,15 @@ class QQAdapter : ChatAppAdapter {
         /** How far above a bubble its nickname may sit (px). See the attach site. */
         private const val NICK_WINDOW_MIN = -24
         private const val NICK_WINDOW_MAX = 200
+
+        // ---- avatar-based side detection (see sideFromAvatar) ----------------
+        /** Max horizontal gap between an avatar and the bubble it belongs to (px). */
+        private const val AVATAR_MAX_GAP = 80
+        /** Avatars are square within this fraction of their long side. */
+        private const val AVATAR_SQUARE_TOL = 0.35f
+        /** Avatar size window in dp (QQ's is ~40dp; generous on both ends). */
+        private const val AVATAR_MIN_DP = 24f
+        private const val AVATAR_MAX_DP = 72f
     }
 }
 

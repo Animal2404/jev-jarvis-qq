@@ -2,7 +2,7 @@ name: Build APK
 
 # Builds the app entirely in the cloud and attaches the APK to a Release.
 #
-# Trigger it from the Actions tab ("Run workflow"), or push a tag like v1.6.
+# Trigger it from the Actions tab ("Run workflow"), or push a tag like v1.7.
 # No credentials are involved: the APK ships without API keys and each user
 # pastes their own into the settings page.
 
@@ -61,21 +61,41 @@ jobs:
           echo "no key pattern found in the APK"
           ls -l "$apk"
 
+      - name: Assert the APK is signed by the pinned release key
+        run: |
+          set -euo pipefail
+          apk=app/build/outputs/apk/release/app-release.apk
+          # The signing certificate MUST be the committed one, or the update
+          # cannot be installed over a previous build and the user has to
+          # uninstall (losing their settings). This regressed silently before:
+          # CI fell back to the debug key, which GitHub regenerates per runner.
+          # Compare against the pinned fingerprint of keystore/release.jks.
+          EXPECTED="56:6E:C2:D4:12:BD:CB:24:00:45:28:3E:33:4A:E1:DF:FC:01:33:4A:F5:C7:29:DB:44:31:45:F8:95:98:91:11"
+          got=$(keytool -printcert -jarfile "$apk" 2>/dev/null \
+                | grep -i 'SHA256:' | head -1 \
+                | sed 's/.*SHA256: *//' | tr -d ' ' | tr 'a-f' 'A-F')
+          echo "signing cert SHA256: $got"
+          if [ "$got" != "$EXPECTED" ]; then
+            echo "::error::APK signed by an unexpected key ($got). It will NOT install over an existing build."
+            exit 1
+          fi
+          echo "signature matches the pinned release key"
+
       - name: Package, checksum and stage
         id: stage
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk dist/jev-assistant-v1.6-qq.apk
+          cp app/build/outputs/apk/release/app-release.apk dist/jev-assistant-v1.7-qq.apk
           cd dist
-          sha256sum jev-assistant-v1.6-qq.apk > SHA256SUMS.txt
+          sha256sum jev-assistant-v1.7-qq.apk > SHA256SUMS.txt
           cat SHA256SUMS.txt
-          echo "size=$(du -h jev-assistant-v1.6-qq.apk | cut -f1)" >> "$GITHUB_OUTPUT"
+          echo "size=$(du -h jev-assistant-v1.7-qq.apk | cut -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Upload as workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: jev-assistant-v1.6-qq
+          name: jev-assistant-v1.7-qq
           path: dist/
 
       - name: Resolve release tag
@@ -86,7 +106,7 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           else
-            echo "name=v1.6-build${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+            echo "name=v1.7-build${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Publish Release
@@ -94,15 +114,19 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.name }}
-          name: 对话副驾 v1.6（Android 9~17 · 群聊 · 云端构建）
+          name: 对话副驾 v1.7（可覆盖安装 · 头像识别 · Android 9~17）
           body: |
             ## 安装
 
             ```bash
-            adb install -r jev-assistant-v1.6-qq.apk
+            adb install -r jev-assistant-v1.7-qq.apk
             ```
 
             或把 APK 直接传到手机点击安装（arm64 机型，**Android 9 ~ 17**）。
+
+            > **从本版起可以直接覆盖安装**，不用先卸载。之前每个版本的签名都不一样
+            > （云端构建每次在新机器上重新生成调试密钥），所以系统拒绝覆盖、必须卸载重装，
+            > 连带把设置和密钥都清掉。现在改用仓库里固定的签名密钥，构建时会断言签名一致。
 
             ## 首次使用要填两个密钥
 
@@ -111,23 +135,36 @@ jobs:
             | 用途 | 地址 | 模型 | 密钥从哪来 |
             |---|---|---|---|
             | 判断接口 | `https://api.knoxstudio.ai/v1` | `jev-1.13.0` | 你自己的 Knox Studio 密钥 |
-            | 回复接口 | `https://tokenrhythm.studio/v1` | `mimo-v2.6-flash` | 你自己的 TokenRhythm 密钥 |
+            | 回复接口 | `https://tokenrhythm.studio/v1` | `deepseek-flash` | 你自己的 TokenRhythm 密钥 |
 
             两路预设都已内置为默认值，只需粘两条密钥。填完点「测试判断」「测试回复」确认通了再保存。
+            回复模型和 OCR 模型都默认用 `deepseek-flash`（实测支持图片输入）。
 
             > 设置页有「备份与恢复」：导出一个配置文件存在手机里，卸载重装后导回来，
             > 密钥和所有设置都不用重填。
 
             ## 这一版改了什么
 
+            - **修复「别人的消息被识别成我」**：改成**按头像判断**。头像永远贴在发言者
+              自己那一侧的外缘，消息再长也不会跑；而之前两版都是拿气泡边沿去比一个
+              猜出来的像素列（屏幕宽的 13%、9.2%），长消息必然判反，换个分辨率也会错。
+              新逻辑在 720/1080/1440 三种宽度 × 2.0/2.75/3.5 三种密度下 19 项用例全过，
+              并且会识别并排除「别人发的截图」这种大方块图片。
+            - **修复「别人一发消息，已生成的回复就消失」**：以前每条新消息都会清空面板
+              并重新分析；群里刷屏时面板就一直在闪。现在只有**换了会话**才清空，
+              同一会话里旧结果保留到新结果出来，标题显示「刷新中…」；正在跑的分析
+              也不会被丢弃，而是排队等它结束后用最新消息再跑一次。
+            - **默认模型改为 `deepseek-flash`**（回复 + OCR）。
+              另外修了一个隐藏问题：改代码里的默认值对**已安装**的 App 无效，因为旧值
+              早就存在配置里了 —— 现在加了一次性迁移，只把「恰好等于我们上一版默认值」
+              的模型换成新默认，你自己手填的模型绝不会被动。
+            - **修复自检按钮**：原来是个没有背景没有边框的纯文字，看上去就是个标签，
+              所以「全白只能看到字」。现在是有边框的按钮，结果紧跟在下面。
             - **回复不再有 AI 味**：system 提示词从「你是回复助手」改为**人设身份**
               （「你就是一个普通人在用手机聊天…不是助手，不是 AI」），并采用
               [NeoBot](https://github.com/SuperQuail/NeoBot) 的几条实测有效规则：
               不要回复得太有条理、平淡简短、禁止用（）描述动作、给出「错误→正确」样例。
               实测整洁度（三条回复的长度均匀程度）由 26 降到 10~17，平均 5~8 字。
-            - **修复「别人的消息被识别成我」**：侧别判断原来把气泡边沿与头像列比较，
-              长消息必然判反（截图实测：唐天 → 我）。改为与气泡自己的锚点比较，
-              8/8 几何用例通过。顺带修复群昵称绑定，群聊模式现在能真正生效。
             - **「目前对话」面板**：悬浮窗顶部显示本次判断依据的最后 6 条消息，
               群聊里显示真实昵称，最新一条加粗并注明「判断针对的就是这句」。
             - **群聊模式**：识别发言人、按「群里的人」而非「对方」判断，

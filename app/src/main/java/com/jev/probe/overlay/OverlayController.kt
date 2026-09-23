@@ -45,6 +45,9 @@ class OverlayController(private val ctx: Context) {
     private var dangerDot: View? = null
     private var panel: LinearLayout? = null
     private var contentBox: LinearLayout? = null
+
+    /** Header label; carries the "刷新中…" state during a background refresh. */
+    private var headerTitle: TextView? = null
     private var expanded = false
     private var lp: WindowManager.LayoutParams? = null
 
@@ -183,7 +186,7 @@ class OverlayController(private val ctx: Context) {
             text = "Jev 分析"; setTextColor(Color.parseColor("#111827")); textSize = 15f
             setTypeface(typeface, Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        })
+        }.also { headerTitle = it })
         header.addView(iconBtn("⚙") { openSettings() })
         header.addView(iconBtn("✕") { toggle() })
         p.addView(header)
@@ -426,6 +429,43 @@ class OverlayController(private val ctx: Context) {
         if (!expanded) toggle()
     }
 
+    /**
+     * A new analysis round is starting.
+     *
+     * Shows the "分析中…" placeholder ONLY when the panel has nothing worth
+     * keeping. When a verdict and candidates are already displayed they stay on
+     * screen until the new result replaces them — otherwise a chatty group
+     * blanked the panel on every incoming message, which is exactly what the
+     * user reported ("别人发信息，已生成的回复马上就会消失").
+     */
+    fun beginAnalysis() {
+        ensureRoot()
+        bubble?.alpha = 1f
+        ctxNotes = 0; ctxHistory = 0
+        replyError = null
+        if (lastJudgment == null || contentBox?.childCount == 0) {
+            setContent(listOf(hint("分析中…")))
+        } else {
+            setRefreshing(true)   // keep the old content, mark it as refreshing
+        }
+        if (!expanded) toggle()
+    }
+
+    /** Tint the header while a background refresh runs over existing content. */
+    private fun setRefreshing(on: Boolean) {
+        headerTitle?.text = if (on) "Jev 分析 · 刷新中…" else "Jev 分析"
+        headerTitle?.setTextColor(Color.parseColor(if (on) "#6B7280" else "#111827"))
+    }
+
+    /**
+     * Report a failure only when the panel has nothing to show. While a refresh
+     * runs over existing candidates, a transient network error must not destroy
+     * a result the user is reading.
+     */
+    fun showErrorIfEmpty(msg: String) {
+        if (lastJudgment == null || contentBox?.childCount == 0) showError(msg)
+    }
+
     /** How many knowledge notes / history lines went into the pending analysis. */
     fun setContextInfo(notes: Int, history: Int) {
         ctxNotes = notes; ctxHistory = history
@@ -466,6 +506,7 @@ class OverlayController(private val ctx: Context) {
 
     fun showError(msg: String) {
         ensureRoot(); bubble?.alpha = 1f
+        setRefreshing(false)
         setContent(listOf(
             line("出错了", "#DC2626", 14f, true),
             hint(msg)))
@@ -479,6 +520,7 @@ class OverlayController(private val ctx: Context) {
     fun showReplies(ranked: List<RankedReply>, error: String? = null, onFill: (String) -> Unit) {
         lastFill = onFill
         replyError = error
+        setRefreshing(false)
         val a = lastJudgment?.copy(rankedReplies = ranked) ?: return
         lastJudgment = a
         render(a, generating = false)
@@ -490,6 +532,7 @@ class OverlayController(private val ctx: Context) {
         val r = root ?: return
         runCatching { wm.removeView(r) }
         root = null; bubble = null; panel = null; contentBox = null; dangerDot = null; expanded = false
+        headerTitle = null
     }
 
     // --------------------------------------------------------------- rendering

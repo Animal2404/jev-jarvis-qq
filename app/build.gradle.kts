@@ -7,22 +7,45 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-// Release signing: reads a properties file kept OUTSIDE the repo
-// (storeFile / storePassword / keyAlias / keyPassword). Override the path with
-// the JEV_KEYSTORE_PROPS env var. Without it (the CI case) the release build
-// falls back to the debug key so the published APK stays installable.
+// ---------------------------------------------------------------- signing
 //
-// Resolved through java.io.File, NOT Gradle's file(): the latter parses a
-// Windows path like "H:/android/keys/..." as a URL whose scheme is "H" and
-// hard-fails the entire build on Linux ("Cannot convert URL ... to a file").
-// `File` is imported explicitly because in a Kotlin DSL script the bare name
-// `java` resolves to the Java plugin extension, not the package.
-val releasePropsFile = File(
+// A FIXED keystore committed to the repo, so every build — CI and local — is
+// signed with the same key and can be installed OVER the previous version.
+//
+// Why this exists: the first CI builds fell back to the debug key, and GitHub
+// runners are fresh VMs, so Gradle generated a NEW debug keystore on every run.
+// Each release therefore had a different signature, and Android refuses to
+// update an app whose signature changed ("应用未安装" / INSTALL_FAILED_UPDATE_
+// INCOMPATIBLE) — the user had to uninstall, which also wiped their settings.
+// Verified by hashing the APK signing block of two builds: they differed.
+//
+// This is a personal sideloaded app, so the keystore (and its password) living
+// in the repo is a deliberate trade for reproducible updates. It is NOT a
+// secret in any meaningful sense: it stops signature churn, it does not protect
+// anything. If you fork this, replace it with your own.
+val fixedKeystore = File(rootProject.projectDir, "keystore/release.jks")
+val fixedProps = Properties().apply {
+    put("storeFile", fixedKeystore.absolutePath)
+    put("storePassword", "jevjarvis")
+    put("keyAlias", "jev")
+    put("keyPassword", "jevjarvis")
+}
+
+// An external properties file still wins when present (keeps a private key
+// possible); otherwise the committed keystore is used when it exists.
+val externalPropsFile = File(
     System.getenv("JEV_KEYSTORE_PROPS") ?: "H:/android/keys/jev-release.properties"
 )
-val releaseProps = Properties().apply {
-    if (releasePropsFile.isFile) FileInputStream(releasePropsFile).use { load(it) }
+val externalProps = Properties().apply {
+    if (externalPropsFile.isFile) FileInputStream(externalPropsFile).use { load(it) }
 }
+// File(...) rather than Gradle's file(): the latter parses a Windows "H:/..."
+// path as a URL whose scheme is "H" and hard-fails the build on Linux. `File`
+// is imported explicitly because a Kotlin DSL script resolves the bare name
+// `java` to the Java plugin extension, not the package.
+val useExternal = externalProps.isNotEmpty()
+val signingProps = if (useExternal) externalProps else fixedProps
+val haveSigning = useExternal || fixedKeystore.isFile
 
 android {
     namespace = "com.jev.probe"
@@ -51,8 +74,8 @@ android {
         // behaviour (mandatory resizability, local-network permission) that this
         // app has no need for yet.
         targetSdk = 36
-        versionCode = 7
-        versionName = "1.6"
+        versionCode = 8
+        versionName = "1.7"
 
         // ML Kit's bundled Chinese recognizer ships native libs for every ABI.
         // Only arm64-v8a is kept — the other three are dead weight (the app is
@@ -63,29 +86,22 @@ android {
     }
 
     signingConfigs {
-        if (releaseProps.isNotEmpty()) {
-            create("release") {
-                // File(...) rather than file(...): a Windows "H:/..." path is
-                // parsed as a URL by the latter and kills the build on Linux.
-                storeFile = File(releaseProps.getProperty("storeFile"))
-                storePassword = releaseProps.getProperty("storePassword")
-                keyAlias = releaseProps.getProperty("keyAlias")
-                keyPassword = releaseProps.getProperty("keyPassword")
-            }
+        // Always created: signingProps is either the external file or the
+        // committed keystore. `haveSigning` is false only if both are missing,
+        // in which case the debug key is used and the APK will not update over
+        // a previous one — so the build prints a loud warning.
+        create("release") {
+            storeFile = File(signingProps.getProperty("storeFile"))
+            storePassword = signingProps.getProperty("storePassword")
+            keyAlias = signingProps.getProperty("keyAlias")
+            keyPassword = signingProps.getProperty("keyPassword")
         }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Fall back to the debug key when no release keystore is present
-            // (CI), so the artifact is always installable. Sideloading an APK
-            // signed with the debug key is fine; an unsigned one is not.
-            signingConfig = if (releaseProps.isNotEmpty()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
-            }
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
@@ -111,6 +127,15 @@ android {
 // No API keys are baked into the APK on purpose: the artifact is public, and
 // anything inside it can be extracted. Each user pastes their own keys into the
 // settings page once; they live only in the device's app-private storage.
+
+// Warn loudly if the build is about to produce an APK that cannot be installed
+// over the previous one — that failure mode is invisible until the user tries.
+if (!haveSigning) {
+    logger.warn(
+        "WARNING: no signing keystore found (neither keystore/release.jks nor " +
+            "JEV_KEYSTORE_PROPS). The APK will NOT install over an earlier build."
+    )
+}
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")

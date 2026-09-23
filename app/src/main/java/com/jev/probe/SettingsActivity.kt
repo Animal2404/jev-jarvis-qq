@@ -396,18 +396,20 @@ class SettingsActivity : AppCompatActivity() {
                 .setNegativeButton("取消", null)
                 .show()
         })
-        // Deliberately low-key: a developer aid, not a user feature.
-        card2.addView(text("自检", 12f, sub).apply {
-            setPadding(dp(2), dp(12), dp(8), dp(2))
-            setOnClickListener {
-                kbResult.text = "自检中…"
-                worker.execute {
-                    val out = try { KbSelfCheck.run(this@SettingsActivity) }
-                    catch (e: Exception) { "自检异常：${e.javaClass.simpleName} ${e.message ?: ""}" }
-                    main.post { kbResult.text = out }
-                }
+        // Was an unstyled TextView: no background, no border, same colour as the
+        // card, so on screen it read as a bare label ("全白的，只能看到字") with no
+        // hint it was tappable, and its result appeared far below it. It is now a
+        // real outlined button with the result directly underneath.
+        card2.addView(cardBtn("运行自检") {
+            kbResult.text = "自检中…"
+            worker.execute {
+                val out = try { KbSelfCheck.run(this@SettingsActivity) }
+                catch (e: Exception) { "自检异常：${e.javaClass.simpleName} ${e.message ?: ""}" }
+                main.post { kbResult.text = out }
             }
         })
+        card2.addView(text("检查联系人与笔记匹配、历史去重、上下文注入是否正常。会临时建一条测试数据并自动删除。",
+            11f, sub))
         card2.addView(kbResult)
         root.addView(card2)
 

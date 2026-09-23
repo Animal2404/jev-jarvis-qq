@@ -20,7 +20,7 @@ class Prefs(context: Context, prefsName: String = PREFS_MAIN) {
      * throwaway instances behind the settings test buttons and the KB self-check
      * have nothing to carry over, and used to print one migration line per tap.
      */
-    init { if (prefsName == PREFS_MAIN) migrateIfNeeded() }
+    init { if (prefsName == PREFS_MAIN) { migrateIfNeeded(); adoptNewModelDefaults() } }
 
     /**
      * v1.2 -> v1.3: the single `openrouter_key` becomes the judge route's key.
@@ -36,6 +36,37 @@ class Prefs(context: Context, prefsName: String = PREFS_MAIN) {
             Log.i(TAG, "prefs migrated judgeKey.len=${legacy.length}")
         } else {
             Log.i(TAG, "prefs migrated judgeKey.len=${current.length} (no legacy key to copy)")
+        }
+        e.apply()
+    }
+
+    /**
+     * Move a model off the previous build's default and onto the current one.
+     *
+     * Changing a default in code does nothing for anyone who already ran the
+     * app: the old value was written into their storage on first save, and a
+     * stored value always wins over the default. That is why "the default model
+     * is still the old one" after updating — the user asked whether saving
+     * worked at all, and this is the real answer.
+     *
+     * Only an EXACT match on our own previous default is migrated. A model the
+     * user typed themselves (anything else, including a custom gateway's name)
+     * is never touched, so their choice always survives.
+     */
+    private fun adoptNewModelDefaults() {
+        if (sp.getBoolean(K_MIGRATED_V16, false)) return
+        val e = sp.edit().putBoolean(K_MIGRATED_V16, true)
+        // Previous shipped defaults. Keep this list append-only across versions.
+        val oldDefaults = setOf("mimo-v2.6-flash", "mimo-v2.5-pro", "mimo-v2.6-pro")
+        val reply = sp.getString(K_REPLY_MODEL, "") ?: ""
+        if (reply in oldDefaults) {
+            e.putString(K_REPLY_MODEL, TOKENRHYTHM_MODEL)
+            Log.i(TAG, "prefs: reply model migrated from a previous default")
+        }
+        val vision = sp.getString(K_VISION_MODEL, "") ?: ""
+        if (vision in oldDefaults) {
+            e.putString(K_VISION_MODEL, TOKENRHYTHM_MODEL)
+            Log.i(TAG, "prefs: vision model migrated from a previous default")
         }
         e.apply()
     }
@@ -301,6 +332,7 @@ class Prefs(context: Context, prefsName: String = PREFS_MAIN) {
 
         private const val K_LEGACY_KEY = "openrouter_key"
         private const val K_MIGRATED_V13 = "prefs_migrated_v13"
+        private const val K_MIGRATED_V16 = "prefs_migrated_v16_models"
         private const val K_JUDGE_PROVIDER = "judge_provider"
         private const val K_JUDGE_BASE = "judge_base_url"
         private const val K_JUDGE_KEY = "judge_key"
@@ -349,11 +381,22 @@ class Prefs(context: Context, prefsName: String = PREFS_MAIN) {
         const val DEFAULT_JUDGE_MODEL_KNOX = "jev-1.13.0"
 
         // Reply route presets (OpenAI-compatible chat completions). Default is
-        // TokenRhythm, serving `mimo-v2.6-flash`.
+        // TokenRhythm, serving `deepseek-flash`.
         const val DEFAULT_REPLY_BASE = "https://openrouter.ai/api/v1"
         const val DEFAULT_REPLY_MODEL = "deepseek/deepseek-chat-v3.1"
         const val TOKENRHYTHM_BASE = "https://tokenrhythm.studio/v1"
-        const val TOKENRHYTHM_MODEL = "mimo-v2.6-flash"
+
+        /**
+         * Default model for BOTH the reply route and the OCR/vision route.
+         *
+         * One model covers both because `deepseek-flash` advertises
+         * `supports_vision=true` and in practice accepts an `image_url` content
+         * part (verified live: a solid-colour JPEG came back correctly named),
+         * so it can draft replies and read screenshots. It is also the model the
+         * user asked for by name.
+         */
+        const val TOKENRHYTHM_MODEL = "deepseek-flash"
+
         const val DEEPSEEK_BASE = "https://api.deepseek.com/v1"
         const val DEEPSEEK_MODEL = "deepseek-chat"
         const val DASHSCOPE_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1"
