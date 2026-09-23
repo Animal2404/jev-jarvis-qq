@@ -26,18 +26,37 @@ val releaseProps = Properties().apply {
 
 android {
     namespace = "com.jev.probe"
-    compileSdk = 35
+
+    // compileSdk 36 = Android 16. This is what lets the app run on Android 17
+    // (API 37): an app compiled and targeted against 36 is forward-compatible —
+    // targeting 37 is not required until Play demands it (Aug 2027) and AGP
+    // 8.13 has no API 37 platform support to compile against anyway.
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.jev.probe"
-        minSdk = 30
-        targetSdk = 35
-        versionCode = 6
-        versionName = "1.5"
+
+        // Android 9 (API 28) through Android 17 (API 37).
+        //
+        // minSdk 28 vs the upstream 30: the only API-30 feature this app needs
+        // is AccessibilityService.takeScreenshot, which is the OCR fallback for
+        // apps whose node tree carries no text (Feishu). That call is now
+        // runtime-gated in ScreenCapture.capture(), so on Android 9/10 the app
+        // runs normally and only the OCR fallback reports "unsupported" instead
+        // of crashing with NoSuchMethodError.
+        minSdk = 28
+
+        // targetSdk stays at 36 rather than tracking compileSdk up to 37: 36 is
+        // the current Play requirement, and raising it only opts into stricter
+        // behaviour (mandatory resizability, local-network permission) that this
+        // app has no need for yet.
+        targetSdk = 36
+        versionCode = 7
+        versionName = "1.6"
 
         // ML Kit's bundled Chinese recognizer ships native libs for every ABI.
-        // The target phone (and every phone this can run on: minSdk 30) is
-        // arm64, so keep only that one — the other three are dead weight.
+        // Only arm64-v8a is kept — the other three are dead weight (the app is
+        // ~25MB, of which the OCR .so and models are the bulk).
         ndk {
             abiFilters += listOf("arm64-v8a")
         }

@@ -64,8 +64,26 @@ class ReplyClient(private val prefs: Prefs) {
                     append("这 3 条都是回复群里最新那条消息的。")
                 }
             }
-            append("三条策略要有区别（例如：一条稳妥承接、一条给具体行动或承诺、一条简短低姿态）。")
-            append("每条不超过 40 字，口语、自然、像真人在聊天软件里发消息。")
+            // The anti-assistant rules below are the measured fix for "AI 味太浓、
+            // 非常尴尬". A live A/B on two real scenes showed the problem was
+            // never the vocabulary (both prompts used zero banned words) — it was
+            // LENGTH and REGISTER: the old prompt averaged 19-21 characters per
+            // reply and read like a written sentence, while a human-register
+            // prompt averaged 8-9 characters and actually used 语气词 (5-8 per
+            // set vs 0-2). So the rules are: a hard character cap, explicit
+            // permission to be fragmentary, and a named ban on the assistant
+            // register (说教 / 安慰 / 承诺 / 客服) that the old "give a concrete
+            // commitment" strategy line was actively asking for.
+            append("你是一个普通人在用手机聊天，不是助手，不要端着。")
+            append("硬性要求：")
+            append("每条不超过 20 个字，真人打字就是这么短；")
+            append("可以有语气词（啊 吧 呢 嘛 哈哈）、可以省主语、可以重复词，像随手打的；")
+            append("严禁这些词：建议 可以 应该 记住 务必 亲 您好 感谢 加油 相信 一起努力 抱歉 不好意思 麻烦 首先 总之 因此；")
+            append("严禁说教、严禁安慰式总结、严禁给行动方案或承诺、严禁客服腔、严禁排比和成语；")
+            append("emoji 最多一个，通常没有。")
+            append("三条要有区别，但都必须是「随手打出来的一句话」：")
+            append("一条顺着对方情绪说，一条自嘲或认怂，一条只回几个字（比如「行」「知道了」「哈哈哈」）。")
+            append("三条不要用同一个开头，也不要每条都以标点结尾。")
             append("不要解释，不要 markdown 代码块，不要引号以外的任何内容，直接输出那个 JSON 数组。")
         }
         val user = knowledgeBlock(relationship, ctx) +

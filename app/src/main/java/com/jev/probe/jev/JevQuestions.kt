@@ -288,8 +288,16 @@ object JevQuestions {
             } else {
                 append("Which candidate reply is the most appropriate next message, ")
                 append("given the conversation and the other person's true need? ")
-                append("Prefer a reply that matches the best action type. ")
-                append("Penalize dismissive, over-promising, or off-topic replies. ")
+                // Deliberately does NOT say "prefer a reply that matches the best
+                // action type": that phrasing kept selecting the wordiest,
+                // most-committal candidate, which is the assistant register the
+                // user flagged as awkward. The ranking now favours the candidate
+                // that reads like something a person would actually type.
+                append("Prefer the candidate that reads like a real person typing a short message ")
+                append("in a chat app: natural, brief, matching the other person's tone. ")
+                append("Penalize candidates that sound like an assistant or customer service — ")
+                append("preachy, over-explaining, over-promising, or longer than the situation needs. ")
+                append("Penalize dismissive or off-topic replies. ")
                 append("If the facts are not yet confirmed, prefer the candidate that looks them up ")
                 append("instead of faking memory or a vague apology.")
             }

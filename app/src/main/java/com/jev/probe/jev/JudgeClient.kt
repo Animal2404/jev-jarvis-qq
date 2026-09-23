@@ -30,7 +30,7 @@ class JudgeClient(private val prefs: Prefs) {
         target: String? = null
     ): Analysis {
         val start = System.currentTimeMillis()
-        try {
+        return try {
             val answers = postDecisions(
                 snapshot, relationship, ctx,
                 JevQuestions.judge(group = snapshot.groupLike, focusSpeaker = target)

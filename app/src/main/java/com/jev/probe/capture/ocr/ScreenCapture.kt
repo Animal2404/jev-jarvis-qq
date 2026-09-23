@@ -64,6 +64,16 @@ class ScreenCapture(
 
     /** Take one screenshot. [onResult] runs on the main thread, exactly once. */
     fun capture(onResult: (Result) -> Unit) {
+        // AccessibilityService.takeScreenshot only exists from API 30 (Android 11).
+        // On Android 9/10 the OCR fallback cannot work at all, so say so plainly
+        // instead of letting NoSuchMethodError surface from the call below.
+        // Verified gate: the whole takeScreenshot family (TakeScreenshotCallback,
+        // ScreenshotResult, takeScreenshotOfWindow) is API 30+, and minSdk is 28.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            onResult(Result.Failed(CODE_UNSUPPORTED,
+                "系统版本过低（Android 11 以下）不支持免 root 截屏，OCR 兜底不可用"))
+            return
+        }
         val now = SystemClock.elapsedRealtime()
         val need = requiredInterval()
         if (now - lastAttemptAt < need) {
@@ -177,6 +187,8 @@ class ScreenCapture(
         const val CODE_THROTTLED = -1
         /** Our own watchdog: the platform callback never arrived. */
         const val CODE_TIMEOUT = -2
+        /** Our own gate: the OS has no accessibility screenshot API (pre-Android 11). */
+        const val CODE_UNSUPPORTED = -3
         private const val CODE_INTERNAL = 1
 
         private const val MIN_INTERVAL_MS = 1000L
@@ -203,6 +215,7 @@ class ScreenCapture(
         fun humanMessage(code: Int): String = when (code) {
             CODE_THROTTLED -> "截屏太频繁"
             CODE_TIMEOUT -> "截屏超时"
+            CODE_UNSUPPORTED -> "系统版本过低（Android 11 以下）不支持免 root 截屏，OCR 兜底不可用"
             1 -> "截屏失败：内部错误（系统拒绝，可能是该无障碍服务不被允许截屏）"
             2 -> "截屏失败：无障碍服务未声明截屏能力（去设置里把无障碍关掉再开启）"
             3 -> "截屏失败：间隔太短，等一秒再试"
