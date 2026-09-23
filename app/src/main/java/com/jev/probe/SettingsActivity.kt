@@ -41,10 +41,10 @@ class SettingsActivity : AppCompatActivity() {
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
 
-    private val accent get() = Palette.accent(this)
-    private val ink get() = Palette.ink(this)
-    private val sub get() = Palette.sub(this)
-    private val pillOff get() = Palette.pillOff(this)
+    private val accent get() = Palette.accent(this@SettingsActivity)
+    private val ink get() = Palette.ink(this@SettingsActivity)
+    private val sub get() = Palette.sub(this@SettingsActivity)
+    private val pillOff get() = Palette.pillOff(this@SettingsActivity)
 
     /** Selected provider index per card, held so Save can read it back. */
     private var judgeProviderIdx = 0
@@ -57,7 +57,7 @@ class SettingsActivity : AppCompatActivity() {
         prefs = Prefs(this)
         Log.i(TAG, "settings opened judgeKey.len=${prefs.judgeKey.length}" +
             " replyKey.len=${prefs.replyKey.length} visionKey.len=${prefs.visionKey.length}")
-        window.decorView.setBackgroundColor(Palette.bg(this))
+        window.decorView.setBackgroundColor(Palette.bg(this@SettingsActivity))
 
         val scroll = ScrollView(this)
         val root = LinearLayout(this).apply {
@@ -807,7 +807,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun paintPill(v: TextView, on: Boolean) {
-        v.setTextColor(if (on) Palette.onAccent(this) else sub)
+        v.setTextColor(if (on) Palette.onAccent(this@SettingsActivity) else sub)
         v.setTypeface(v.typeface, if (on) Typeface.BOLD else Typeface.NORMAL)
         v.background = round(dp(9), if (on) accent else pillOff)
     }
@@ -823,15 +823,15 @@ class SettingsActivity : AppCompatActivity() {
         val sw = TextView(this).apply {
             text = if (initial) "开" else "关"; textSize = 13f; gravity = Gravity.CENTER
             setTypeface(typeface, Typeface.BOLD)
-            setTextColor(if (initial) Palette.onAccent(this) else sub)
-            background = round(dp(10), if (initial) accent else Palette.pillOff(this))
+            setTextColor(if (initial) Palette.onAccent(this@SettingsActivity) else sub)
+            background = round(dp(10), if (initial) accent else Palette.pillOff(this@SettingsActivity))
             setPadding(dp(18), dp(6), dp(18), dp(6))
         }
         sw.setOnClickListener {
             val now = !((row.tag as? Boolean) ?: true); row.tag = now
             sw.text = if (now) "开" else "关"
-            sw.setTextColor(if (now) Palette.onAccent(this) else sub)
-            sw.background = round(dp(10), if (now) accent else Palette.pillOff(this))
+            sw.setTextColor(if (now) Palette.onAccent(this@SettingsActivity) else sub)
+            sw.background = round(dp(10), if (now) accent else Palette.pillOff(this@SettingsActivity))
         }
         row.addView(lab); row.addView(sw)
         return row
@@ -846,7 +846,7 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun card() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        background = round(dp(14), Palette.card(this))
+        background = round(dp(14), Palette.card(this@SettingsActivity))
         setPadding(dp(14), dp(4), dp(14), dp(14))
         layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -855,8 +855,8 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun edit(value: String, hint: String, password: Boolean = false) = EditText(this).apply {
         setText(value); this.hint = hint; textSize = 14f; setTextColor(ink)
-        setHintTextColor(Palette.hint(this))
-        background = round(dp(8), Palette.field(this))
+        setHintTextColor(Palette.hint(this@SettingsActivity))
+        background = round(dp(8), Palette.field(this@SettingsActivity))
         setPadding(dp(10), dp(10), dp(10), dp(10))
         // Masked, not VISIBLE_PASSWORD: an API key should not sit in plain sight.
         if (password) inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
@@ -870,7 +870,7 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun primaryBtn(label: String, onClick: () -> Unit) = TextView(this).apply {
         text = label; textSize = 15f; gravity = Gravity.CENTER; setTypeface(typeface, Typeface.BOLD)
-        setTextColor(Palette.onAccent(this)); background = round(dp(12), accent)
+        setTextColor(Palette.onAccent(this@SettingsActivity)); background = round(dp(12), accent)
         setPadding(dp(16), dp(13), dp(16), dp(13))
         layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(18) }
@@ -880,7 +880,7 @@ class SettingsActivity : AppCompatActivity() {
     /** Outlined button sized for inside a card. */
     private fun cardBtn(label: String, onClick: () -> Unit) = TextView(this).apply {
         text = label; textSize = 14f; gravity = Gravity.CENTER; setTypeface(typeface, Typeface.BOLD)
-        setTextColor(accent); background = round(dp(10), Palette.card(this), stroke = true)
+        setTextColor(accent); background = round(dp(10), Palette.card(this@SettingsActivity), stroke = true)
         setPadding(dp(14), dp(10), dp(14), dp(10))
         layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(14) }
@@ -890,7 +890,7 @@ class SettingsActivity : AppCompatActivity() {
     /** Small outlined button that sits inline, under the field it acts on. */
     private fun rowBtn(label: String, onClick: () -> Unit) = TextView(this).apply {
         text = label; textSize = 13f; gravity = Gravity.CENTER; setTypeface(typeface, Typeface.BOLD)
-        setTextColor(accent); background = round(dp(9), Palette.card(this), stroke = true)
+        setTextColor(accent); background = round(dp(9), Palette.card(this@SettingsActivity), stroke = true)
         setPadding(dp(12), dp(8), dp(12), dp(8))
         layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) }

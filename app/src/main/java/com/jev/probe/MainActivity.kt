@@ -31,11 +31,11 @@ class MainActivity : AppCompatActivity() {
     private val a11yComponent =
         "com.jev.probe/com.google.android.accessibility.selecttospeak.SelectToSpeakService"
 
-    private val accent get() = Palette.accent(this)
-    private val green get() = Palette.ok(this)
-    private val red get() = Palette.danger(this)
-    private val ink get() = Palette.ink(this)
-    private val sub get() = Palette.sub(this)
+    private val accent get() = Palette.accent(this@MainActivity)
+    private val green get() = Palette.ok(this@MainActivity)
+    private val red get() = Palette.danger(this@MainActivity)
+    private val ink get() = Palette.ink(this@MainActivity)
+    private val sub get() = Palette.sub(this@MainActivity)
 
     private fun dp(v: Int) = TypedValue.applyDimension(
         TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), resources.displayMetrics).roundToInt()
@@ -43,7 +43,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
-        window.decorView.setBackgroundColor(Palette.bg(this))
+        window.decorView.setBackgroundColor(Palette.bg(this@MainActivity))
 
         val scroll = ScrollView(this)
         container = LinearLayout(this).apply {
@@ -190,8 +190,8 @@ class MainActivity : AppCompatActivity() {
         return TextView(this).apply {
             text = if (on) "助手已开启 · 点击关闭" else "助手已关闭 · 点击开启"
             textSize = 15f; gravity = Gravity.CENTER; setTypeface(typeface, Typeface.BOLD)
-            setTextColor(if (on) Palette.onAccent(this) else accent)
-            background = roundBg(dp(14), if (on) accent else Palette.card(this), stroke = !on)
+            setTextColor(if (on) Palette.onAccent(this@MainActivity) else accent)
+            background = roundBg(dp(14), if (on) accent else Palette.card(this@MainActivity), stroke = !on)
             setPadding(dp(16), dp(15), dp(16), dp(15))
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
@@ -203,7 +203,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun cardBox(): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        background = roundBg(dp(14), Palette.card(this))
+        background = roundBg(dp(14), Palette.card(this@MainActivity))
         setPadding(dp(14), dp(13), dp(14), dp(13))
         layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
@@ -226,8 +226,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun btn(label: String, enabled: Boolean, onClick: () -> Unit) = TextView(this).apply {
         text = label; textSize = 13f; gravity = Gravity.CENTER; setTypeface(typeface, Typeface.BOLD)
-        setTextColor(if (enabled) Palette.onAccent(this) else sub)
-        background = roundBg(dp(10), if (enabled) accent else Palette.pillOff(this))
+        setTextColor(if (enabled) Palette.onAccent(this@MainActivity) else sub)
+        background = roundBg(dp(10), if (enabled) accent else Palette.pillOff(this@MainActivity))
         setPadding(dp(16), dp(8), dp(16), dp(8))
         if (enabled) setOnClickListener { onClick() }
     }

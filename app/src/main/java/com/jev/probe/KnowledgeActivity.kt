@@ -37,11 +37,11 @@ class KnowledgeActivity : AppCompatActivity() {
     /** 0 = notes, 1 = contacts. */
     private var tab = 0
 
-    private val accent get() = Palette.accent(this)
-    private val ink get() = Palette.ink(this)
-    private val sub get() = Palette.sub(this)
-    private val pillOff get() = Palette.pillOff(this)
-    private val red get() = Palette.danger(this)
+    private val accent get() = Palette.accent(this@KnowledgeActivity)
+    private val ink get() = Palette.ink(this@KnowledgeActivity)
+    private val sub get() = Palette.sub(this@KnowledgeActivity)
+    private val pillOff get() = Palette.pillOff(this@KnowledgeActivity)
+    private val red get() = Palette.danger(this@KnowledgeActivity)
 
     private fun dp(v: Int) = TypedValue.applyDimension(
         TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), resources.displayMetrics).roundToInt()
@@ -49,7 +49,7 @@ class KnowledgeActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         store = KbStore.get(this)
-        window.decorView.setBackgroundColor(Palette.bg(this))
+        window.decorView.setBackgroundColor(Palette.bg(this@KnowledgeActivity))
 
         val scroll = ScrollView(this)
         container = LinearLayout(this).apply {
@@ -87,7 +87,7 @@ class KnowledgeActivity : AppCompatActivity() {
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT).apply { rightMargin = dp(8) }
-                setTextColor(if (i == tab) Palette.onAccent(this) else sub)
+                setTextColor(if (i == tab) Palette.onAccent(this@KnowledgeActivity) else sub)
                 setTypeface(typeface, if (i == tab) Typeface.BOLD else Typeface.NORMAL)
                 background = round(dp(9), if (i == tab) accent else pillOff)
                 setOnClickListener { tab = i; render() }
@@ -354,8 +354,8 @@ class KnowledgeActivity : AppCompatActivity() {
     private fun wideBtn(labelText: String, primary: Boolean, onClick: () -> Unit) = TextView(this).apply {
         text = labelText; textSize = 14f; gravity = Gravity.CENTER
         setTypeface(typeface, Typeface.BOLD)
-        setTextColor(if (primary) Palette.onAccent(this) else accent)
-        background = round(dp(11), if (primary) accent else Palette.card(this), stroke = !primary)
+        setTextColor(if (primary) Palette.onAccent(this@KnowledgeActivity) else accent)
+        background = round(dp(11), if (primary) accent else Palette.card(this@KnowledgeActivity), stroke = !primary)
         setPadding(dp(12), dp(11), dp(12), dp(11))
         layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             .apply { rightMargin = dp(8) }
@@ -365,8 +365,8 @@ class KnowledgeActivity : AppCompatActivity() {
     private fun smallToggle(on: Boolean, onClick: () -> Unit) = TextView(this).apply {
         text = if (on) "开" else "关"; textSize = 13f; gravity = Gravity.CENTER
         setTypeface(typeface, Typeface.BOLD)
-        setTextColor(if (on) Palette.onAccent(this) else sub)
-        background = round(dp(10), if (on) accent else Palette.pillOff(this))
+        setTextColor(if (on) Palette.onAccent(this@KnowledgeActivity) else sub)
+        background = round(dp(10), if (on) accent else Palette.pillOff(this@KnowledgeActivity))
         setPadding(dp(16), dp(6), dp(16), dp(6))
         setOnClickListener { onClick() }
     }
@@ -382,15 +382,15 @@ class KnowledgeActivity : AppCompatActivity() {
         val sw = TextView(this).apply {
             text = if (initial) "开" else "关"; textSize = 13f; gravity = Gravity.CENTER
             setTypeface(typeface, Typeface.BOLD)
-            setTextColor(if (initial) Palette.onAccent(this) else sub)
-            background = round(dp(10), if (initial) accent else Palette.pillOff(this))
+            setTextColor(if (initial) Palette.onAccent(this@KnowledgeActivity) else sub)
+            background = round(dp(10), if (initial) accent else Palette.pillOff(this@KnowledgeActivity))
             setPadding(dp(18), dp(6), dp(18), dp(6))
         }
         sw.setOnClickListener {
             val now = !((row.tag as? Boolean) ?: true); row.tag = now
             sw.text = if (now) "开" else "关"
-            sw.setTextColor(if (now) Palette.onAccent(this) else sub)
-            sw.background = round(dp(10), if (now) accent else Palette.pillOff(this))
+            sw.setTextColor(if (now) Palette.onAccent(this@KnowledgeActivity) else sub)
+            sw.background = round(dp(10), if (now) accent else Palette.pillOff(this@KnowledgeActivity))
         }
         row.addView(lab); row.addView(sw)
         return row
@@ -400,7 +400,7 @@ class KnowledgeActivity : AppCompatActivity() {
 
     private fun card() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        background = round(dp(14), Palette.card(this))
+        background = round(dp(14), Palette.card(this@KnowledgeActivity))
         setPadding(dp(14), dp(12), dp(14), dp(12))
         layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -411,8 +411,8 @@ class KnowledgeActivity : AppCompatActivity() {
 
     private fun edit(value: String, hintText: String) = EditText(this).apply {
         setText(value); hint = hintText; textSize = 14f; setTextColor(ink)
-        setHintTextColor(Palette.hint(this))
-        background = round(dp(8), Palette.field(this))
+        setHintTextColor(Palette.hint(this@KnowledgeActivity))
+        background = round(dp(8), Palette.field(this@KnowledgeActivity))
         setPadding(dp(10), dp(10), dp(10), dp(10))
         layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
