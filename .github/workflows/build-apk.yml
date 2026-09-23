@@ -1,0 +1,144 @@
+name: Build APK
+
+# Builds the app entirely in the cloud and attaches the APK to a Release.
+#
+# Trigger it from the Actions tab ("Run workflow"), or push a tag like v1.4.
+# No credentials are involved: the APK ships without API keys and each user
+# pastes their own into the settings page.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release:
+        description: '发布到 Release（取消勾选则只上传构建产物）'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Build release APK
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Assert no credential leaked into the APK
+        run: |
+          set -euo pipefail
+          apk=app/build/outputs/apk/release/app-release.apk
+          if [ ! -f "$apk" ]; then echo "::error::APK not found at $apk"; exit 1; fi
+          # Guard the promise made to users: nothing key-shaped ships in the build.
+          if strings -a "$apk" | grep -Eq 'sk-[A-Za-z0-9_-]{20,}|sk_tr_[A-Za-z0-9_-]{10,}'; then
+            echo "::error::An API key pattern was found inside the APK"; exit 1
+          fi
+          echo "no key pattern found in the APK"
+          ls -l "$apk"
+
+      - name: Package, checksum and stage
+        id: stage
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk dist/jev-assistant-v1.4-qq.apk
+          cd dist
+          sha256sum jev-assistant-v1.4-qq.apk > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          echo "size=$(du -h jev-assistant-v1.4-qq.apk | cut -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jev-assistant-v1.4-qq
+          path: dist/
+
+      - name: Resolve release tag
+        id: tag
+        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release == 'true'
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=v1.4-build${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish Release
+        if: steps.tag.outputs.name != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: 对话副驾 v1.4（QQ 适配 · 云端构建）
+          body: |
+            ## 安装
+
+            ```bash
+            adb install -r jev-assistant-v1.4-qq.apk
+            ```
+
+            或把 APK 直接传到手机点击安装（arm64 机型，Android 11+）。
+
+            ## 首次使用要填两个密钥
+
+            APK 里**不含任何密钥**。打开 App → 设置，填两条：
+
+            | 用途 | 地址 | 模型 | 密钥从哪来 |
+            |---|---|---|---|
+            | 判断接口 | `https://api.knoxstudio.ai/v1` | `jev-1.13.0` | 你自己的 Knox Studio 密钥 |
+            | 回复接口 | `https://tokenrhythm.studio/v1` | `mimo-v2.6-flash` | 你自己的 TokenRhythm 密钥 |
+
+            两路预设都已内置为默认值，只需粘两条密钥。填完点「测试判断」「测试回复」确认通了再保存。
+
+            ## 这一版改了什么
+
+            - **手机 QQ 适配**（采集逻辑采自上游 v1.3 的真机验证）：无障碍读节点，正文 `id/mjn`、
+              标题 `id/371`、输入框 `id/input`。发送永远由你手动点。
+            - **判断接口 → Knox Studio**：设置页新增该档并设为默认，模型 `jev-1.13.0`。
+            - **回复接口 → TokenRhythm**：设置页新增该档并设为默认，模型 `mimo-v2.6-flash`。
+            - **视觉接口**（OCR 兜底）同样默认走 TokenRhythm 的 `mimo-v2.6-flash`。
+
+            ## 校验
+
+            见附件 `SHA256SUMS.txt`。构建过程会断言 APK 内不含密钥。
+
+            ## 已知边界（未在真机复验）
+
+            - 本次改动是把接口换成 Knox / TokenRhythm，**APK 未在真机上跑过**：QQ 采集逻辑
+              来自上游真机验证（QQ 9.3.50 / 小米 14），但换接口后的端到端流程需要你装到
+              手机上实测一次。
+            - 小米 / HyperOS 装完请按主页向导开「无障碍 + 悬浮窗 + 自启动/省电无限制」。
+
+            ## 说明
+
+            基于 [Jev 聊天助手](https://github.com/jev-chat/jev-chat-jarvis) 二次开发（MIT）。
+            只读屏幕、不 hook、不改包、不替你发送；程序只把候选回复填进输入框。
+          files: dist/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
