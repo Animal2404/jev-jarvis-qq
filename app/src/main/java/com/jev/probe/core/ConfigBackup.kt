@@ -40,6 +40,8 @@ object ConfigBackup {
         "reply_key" to p.replyKey,
         "reply_model" to p.replyModel,
         "reply_thinking" to p.replyThinking,
+        "reply_window" to p.replyWindow,
+        "judge_window" to p.judgeWindow,
         // vision route
         "vision_base_url" to p.visionBaseUrl,
         "vision_key" to p.visionKey,
@@ -84,6 +86,15 @@ object ConfigBackup {
     }
 
     /**
+     * How many settings an exported payload carries. Reported to the user right
+     * after export, so an empty or key-less backup is visible immediately
+     * instead of being discovered after a reinstall.
+     */
+    fun countSettings(json: String): Int = try {
+        JSONObject(json).optJSONObject("settings")?.length() ?: 0
+    } catch (_: Exception) { 0 }
+
+    /**
      * Apply an exported file. Returns a human-readable summary of what was
      * restored, or throws with a readable reason.
      *
@@ -122,6 +133,8 @@ object ConfigBackup {
         str("reply_key") { p.replyKey = it }
         str("reply_model") { p.replyModel = it }
         bool("reply_thinking") { p.replyThinking = it }
+        int("reply_window") { p.replyWindow = it }
+        int("judge_window") { p.judgeWindow = it }
         str("vision_base_url") { p.visionBaseUrl = it }
         str("vision_key") { p.visionKey = it }
         str("vision_model") { p.visionModel = it }

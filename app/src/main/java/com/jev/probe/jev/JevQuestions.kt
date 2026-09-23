@@ -243,11 +243,13 @@ object JevQuestions {
         snapshot: ChatSnapshot,
         relationship: String,
         background: String = "",
-        history: List<LogEntry> = emptyList()
+        history: List<LogEntry> = emptyList(),
+        /** How many messages to include; the caller passes prefs.judgeWindow. */
+        window: Int = 40
     ): JSONObject {
         val msgs = JSONArray()
-        val last10 = snapshot.messages.takeLast(10)
-        for (m in last10) {
+        val recent = snapshot.messages.takeLast(window.coerceAtLeast(1))
+        for (m in recent) {
             val o = JSONObject().put("from", m.side).put("text", m.text)
             // In a group every non-me bubble has side "other", so without the
             // nickname Jev would read five different people as one person and
@@ -258,8 +260,8 @@ object JevQuestions {
         val chat = JSONObject()
             .put("relationship", relationship)
             .put("messages", msgs)
-            .put("latest_from", last10.lastOrNull()?.side ?: "other")
-        val latestSpeaker = last10.lastOrNull()?.speaker
+            .put("latest_from", recent.lastOrNull()?.side ?: "other")
+        val latestSpeaker = recent.lastOrNull()?.speaker
         if (!latestSpeaker.isNullOrBlank()) chat.put("latest_speaker", latestSpeaker)
         // Tells the judgment questions to read this as a room, not a dialogue.
         if (snapshot.groupLike) {

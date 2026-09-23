@@ -74,8 +74,8 @@ android {
         // behaviour (mandatory resizability, local-network permission) that this
         // app has no need for yet.
         targetSdk = 36
-        versionCode = 8
-        versionName = "1.7"
+        versionCode = 9
+        versionName = "1.8"
 
         // ML Kit's bundled Chinese recognizer ships native libs for every ABI.
         // Only arm64-v8a is kept — the other three are dead weight (the app is

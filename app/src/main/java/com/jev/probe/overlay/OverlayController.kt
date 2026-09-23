@@ -491,7 +491,11 @@ class OverlayController(private val ctx: Context) {
         target: String? = null
     ) {
         conversationTitle = title
-        conversation = messages.takeLast(CONVERSATION_SHOWN)
+        // Follows the configured reply window so the panel shows the same
+        // exchange the model was given. It used to be capped at 6, which hid
+        // most of the thread and made the analysis look like it ignored the
+        // conversation ("最多只能观测到 6 条").
+        conversation = messages.takeLast(prefs.replyWindow)
         isGroup = group
         groupTarget = target
     }
@@ -614,6 +618,10 @@ class OverlayController(private val ctx: Context) {
     private fun conversationViews(): List<View> {
         if (conversation.isEmpty()) return emptyList()
         val out = ArrayList<View>()
+        // Only the tail is drawn; the header says how much of the whole capture
+        // that is, so a long thread is never silently truncated.
+        val shown = conversation.takeLast(CONVERSATION_SHOWN)
+        val hidden = conversation.size - shown.size
 
         val head = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
@@ -624,9 +632,16 @@ class OverlayController(private val ctx: Context) {
             setTextColor(Color.parseColor("#374151")); textSize = 12f
             setTypeface(typeface, Typeface.BOLD)
         })
+        head.addView(TextView(ctx).apply {
+            text = if (hidden > 0) "  共 ${conversation.size} 条，显示最近 ${shown.size} 条"
+            else "  共 ${conversation.size} 条"
+            setTextColor(Color.parseColor("#9CA3AF")); textSize = 11f
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        })
         conversationTitle?.takeIf { it.isNotBlank() }?.let {
             head.addView(TextView(ctx).apply {
-                text = "  $it"
+                text = "  · $it"
                 setTextColor(Color.parseColor("#9CA3AF")); textSize = 11f
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
@@ -639,8 +654,8 @@ class OverlayController(private val ctx: Context) {
             background = card(10, Color.parseColor("#F9FAFB"))
             setPadding(dp(8), dp(6), dp(8), dp(6))
         }
-        val last = conversation.lastIndex
-        conversation.forEachIndexed { i, m ->
+        val last = shown.lastIndex
+        shown.forEachIndexed { i, m ->
             val isLatest = i == last
             val row = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -682,7 +697,7 @@ class OverlayController(private val ctx: Context) {
         }
         out.add(box)
         // Name the bubble the judgment is about, so "对方真实意图" below is unambiguous.
-        val lastMsg = conversation.last()
+        val lastMsg = shown.last()
         val lastWho = when {
             lastMsg.side == "me" -> "我"
             !lastMsg.speaker.isNullOrBlank() -> lastMsg.speaker
@@ -697,7 +712,8 @@ class OverlayController(private val ctx: Context) {
         return out
     }
 
-    private fun dangerBadge(lvl: Int, max: Int): View {        val color = dangerColor(lvl)
+    private fun dangerBadge(lvl: Int, max: Int): View {
+        val color = dangerColor(lvl)
         val row = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setPadding(0, 0, 0, dp(6))
@@ -810,8 +826,14 @@ class OverlayController(private val ctx: Context) {
     }
 
     companion object {
-        /** How many recent bubbles the 「目前对话」 block shows. */
-        private const val CONVERSATION_SHOWN = 6
+        /**
+         * How many rows the 「目前对话」 block draws. Deliberately smaller than
+         * the analysis window: the model gets `prefs.replyWindow` messages (up to
+         * 60), but the panel is a quick "what is this about" glance, and the
+         * header states how many of how many are shown so nothing is hidden
+         * silently.
+         */
+        private const val CONVERSATION_SHOWN = 12
 
         private val INTENT = mapOf(
             "confirm_you_care" to "确认你在不在乎", "vent_anger" to "在发泄情绪",

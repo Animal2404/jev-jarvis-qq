@@ -29,9 +29,14 @@ class ReplyClient(private val prefs: Prefs) {
         target: String? = null
     ): List<String> {
         val group = prefs.groupMode && snapshot.groupLike
+        // How much of the thread the model is shown. Configurable (was a fixed
+        // 10): with only the last few lines the drafts answered the final
+        // sentence and ignored what the conversation was actually about, which
+        // is what made them read as 无厘头.
+        val window = snapshot.messages.takeLast(prefs.replyWindow)
         // In a group the transcript must name the speaker, otherwise every
         // bubble reads as the same "对方" and the model answers the wrong person.
-        val convo = snapshot.messages.takeLast(10).joinToString("\n") { m ->
+        val convo = window.joinToString("\n") { m ->
             val who = when {
                 m.side == "me" -> "我"
                 group -> m.speaker?.takeIf { it.isNotBlank() } ?: "群友"
@@ -72,10 +77,10 @@ class ReplyClient(private val prefs: Prefs) {
                 append("不要在群里表白、道歉过度或说只有两个人之间才能说的话。")
                 val to = target?.takeIf { it.isNotBlank() }
                 if (to != null) {
-                    append("这 3 条都是回复给「$to」的，要能对上他/她刚说的话；")
-                    append("在群里可以直接点名（@$to）也可以不点名，选自然的。")
+                    append("这 3 条都是回复给「$to」的：既要对上 $to 刚说的话，")
+                    append("也要接住群里正在聊的话题；在群里可以点名（@$to）也可以不点名，选自然的。")
                 } else {
-                    append("这 3 条都是回复群里最新那条消息的。")
+                    append("这 3 条都是接着群里正在聊的话题说的，不要只针对最后一句。")
                 }
             }
             // The anti-assistant rules below are the measured fix for "AI 味太浓、
@@ -89,6 +94,15 @@ class ReplyClient(private val prefs: Prefs) {
             // NeoBot's <回复要求>, because they target the specific failure my
             // rules alone did not fix: three replies that are all equally tidy.
             append("回复要求：请注意把握聊天内容，不要回复的太有条理，可以有个性。")
+            // The context rule is the fix for "回复非常无厘头 / 只根据最后一条消息":
+            // the transcript above IS the conversation, and a reply must fit it.
+            // Two earlier lines worked against that (see the removed 简短低姿态
+            // strategy framing and the old single-line window), so the
+            // requirement is now stated outright rather than implied.
+            append("最重要：必须读懂上面整段对话在聊什么，回复要接得上这个上下文，")
+            append("不要只针对最后一句、也不要答非所问。")
+            append("先在心里弄清「我们在聊什么、上一句是什么意思」，再决定怎么接；")
+            append("如果最新一句是省略句、反问或梗，要结合前文才能正确理解。")
             append("每条不超过 20 个字，真人打字就是这么短；请平淡一些、简短一些，")
             append("不要刻意突出你懂什么，尽量不要说你说过的话。")
             append("可以有语气词（啊 吧 呢 嘛 哈哈）、可以省主语、可以重复词，像随手打的；")
@@ -107,7 +121,9 @@ class ReplyClient(private val prefs: Prefs) {
         }
         val user = knowledgeBlock(relationship, ctx) +
             if (group) groupUserBlock(snapshot, relationship, convo, target)
-            else "关系：$relationship\n\n最近对话：\n$convo\n\n请给出 3 条候选回复。"
+            else "关系：$relationship\n\n" +
+                "完整对话（越靠下越新，共 ${window.size} 条，请通读后再回）：\n$convo\n\n" +
+                "先判断这段对话在聊什么，再给出 3 条候选回复。"
 
         val first = extractReplies(chat(sys, user, temperature = 0.8))
         if (first.size >= 3) return first.take(3)
@@ -145,8 +161,9 @@ class ReplyClient(private val prefs: Prefs) {
         val to = target?.takeIf { it.isNotBlank() }
         if (to != null) sb.append("这次要回复的人是：").append(to).append('\n')
         sb.append("我和对方的关系（仅供参考，群聊里不一定适用）：").append(relationship).append('\n')
-        sb.append("\n最近对话（每行开头是发言人）：\n").append(convo).append('\n')
-        sb.append("\n请给出 3 条候选回复。")
+        sb.append("\n完整对话（每行开头是发言人，越靠下越新，请通读后再回）：\n")
+        sb.append(convo).append('\n')
+        sb.append("\n先判断群里在聊什么，再给出 3 条候选回复。")
         return sb.toString()
     }
 

@@ -191,6 +191,28 @@ class Prefs(context: Context, prefsName: String = PREFS_MAIN) {
         get() = sp.getInt(K_PANEL_H, -1)
         set(v) = sp.edit().putInt(K_PANEL_H, v).apply()
 
+    /**
+     * How many recent messages the reply model sees. Used to be hard-coded at
+     * 10, which is why replies looked like they answered only the last line:
+     * the model never saw the rest of the thread.
+     *
+     * 30 by default — enough for a group to have a topic, still cheap. Capped at
+     * [MAX_WINDOW] because the capture only collects what is on screen.
+     */
+    var replyWindow: Int
+        get() = sp.getInt(K_REPLY_WINDOW, DEFAULT_WINDOW).coerceIn(MIN_WINDOW, MAX_WINDOW)
+        set(v) = sp.edit().putInt(K_REPLY_WINDOW, v.coerceIn(MIN_WINDOW, MAX_WINDOW)).apply()
+
+    /**
+     * How many recent messages Jev's judgment sees. Separate from
+     * [replyWindow]: judgment benefits from more history (it infers intent from
+     * how the thread got here), while drafts benefit from a tighter window so
+     * the reply stays on the current topic.
+     */
+    var judgeWindow: Int
+        get() = sp.getInt(K_JUDGE_WINDOW, DEFAULT_JUDGE_WINDOW).coerceIn(MIN_WINDOW, MAX_WINDOW)
+        set(v) = sp.edit().putInt(K_JUDGE_WINDOW, v.coerceIn(MIN_WINDOW, MAX_WINDOW)).apply()
+
     // -------------------------------------------------------- context (D)
 
     /**
@@ -358,6 +380,8 @@ class Prefs(context: Context, prefsName: String = PREFS_MAIN) {
         private const val K_BUBBLE_X = "bubble_x"
         private const val K_AUTO = "auto_analyze"
         private const val K_REPLY_THINKING = "reply_thinking"
+        private const val K_REPLY_WINDOW = "reply_window"
+        private const val K_JUDGE_WINDOW = "judge_window"
         private const val K_GROUP_MODE = "group_mode"
         private const val K_GROUP_TARGET = "group_target"
         private const val K_PANEL_W = "panel_width"
@@ -408,5 +432,11 @@ class Prefs(context: Context, prefsName: String = PREFS_MAIN) {
         const val DASHSCOPE_VISION_MODEL = "qwen-vl-max"
 
         const val DEFAULT_REL = "对方是我的伴侣；from=me 的是我发的，from=other 的是对方发的"
+
+        /** Message-window bounds. See [replyWindow] / [judgeWindow]. */
+        const val MIN_WINDOW = 3
+        const val MAX_WINDOW = 60
+        const val DEFAULT_WINDOW = 30
+        const val DEFAULT_JUDGE_WINDOW = 40
     }
 }

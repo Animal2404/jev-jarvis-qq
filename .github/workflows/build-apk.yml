@@ -2,7 +2,7 @@ name: Build APK
 
 # Builds the app entirely in the cloud and attaches the APK to a Release.
 #
-# Trigger it from the Actions tab ("Run workflow"), or push a tag like v1.7.
+# Trigger it from the Actions tab ("Run workflow"), or push a tag like v1.8.
 # No credentials are involved: the APK ships without API keys and each user
 # pastes their own into the settings page.
 
@@ -98,16 +98,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk dist/jev-assistant-v1.7-qq.apk
+          cp app/build/outputs/apk/release/app-release.apk dist/jev-assistant-v1.8-qq.apk
           cd dist
-          sha256sum jev-assistant-v1.7-qq.apk > SHA256SUMS.txt
+          sha256sum jev-assistant-v1.8-qq.apk > SHA256SUMS.txt
           cat SHA256SUMS.txt
-          echo "size=$(du -h jev-assistant-v1.7-qq.apk | cut -f1)" >> "$GITHUB_OUTPUT"
+          echo "size=$(du -h jev-assistant-v1.8-qq.apk | cut -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Upload as workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: jev-assistant-v1.7-qq
+          name: jev-assistant-v1.8-qq
           path: dist/
 
       - name: Resolve release tag
@@ -118,7 +118,7 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           else
-            echo "name=v1.7-build${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+            echo "name=v1.8-build${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Publish Release
@@ -126,12 +126,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.name }}
-          name: 对话副驾 v1.7（可覆盖安装 · 头像识别 · Android 9~17）
+          name: 对话副驾 v1.8（备份修复 · 上下文窗口可调）
           body: |
             ## 安装
 
             ```bash
-            adb install -r jev-assistant-v1.7-qq.apk
+            adb install -r jev-assistant-v1.8-qq.apk
             ```
 
             或把 APK 直接传到手机点击安装（arm64 机型，**Android 9 ~ 17**）。
@@ -157,6 +157,21 @@ jobs:
 
             ## 这一版改了什么
 
+            - **修复「备份导出后导入什么都没有」**（真 BUG）：导出读的是**已保存**的值，
+              而备份卡片在「保存」按钮**上面** —— 你填完密钥往下滚、直接点导出时，
+              密钥还在输入框里没保存，导出文件里就是空的。现在导出会先把界面上的
+              内容写进配置再导出，并在结果里明确写出「含几个密钥」，空的一眼可见。
+              导入成功后界面会自动刷新（以前刷新不了，看着像没生效）。
+            - **消息条数可自定义**：以前写死「回复看 10 条、判断看 10 条、面板只显示 6 条」，
+              三处不一致 —— 这就是你觉得「只能观测到 6 条」的原因。
+              现在设置页可分别设「生成回复看多少条」（默认 30）和「判断意图看多少条」
+              （默认 40），范围 3–60；面板顶部会写「共 N 条，显示最近 M 条」，不再偷偷截断。
+            - **回复必须结合上下文**：提示词原来只说「最近对话」，并且有一条「一条给具体行动
+              或承诺」的策略要求，会把模型往「只答最后一句」上带。现在明确要求
+              「必须读懂整段对话在聊什么，不要只针对最后一句、也不要答非所问」，
+              用户消息也改成「完整对话（共 N 条，请通读后再回）」。
+              实测：同一句结尾「行吧」，在「已答应去取快递」和「对方说自己顺路去」两个
+              相反语境下，生成结果分别守住承诺、不重复答应。
             - **修复「别人的消息被识别成我」**：改成**按头像判断**。头像永远贴在发言者
               自己那一侧的外缘，消息再长也不会跑；而之前两版都是拿气泡边沿去比一个
               猜出来的像素列（屏幕宽的 13%、9.2%），长消息必然判反，换个分辨率也会错。

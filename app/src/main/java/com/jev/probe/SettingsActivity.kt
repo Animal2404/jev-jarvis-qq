@@ -77,8 +77,8 @@ class SettingsActivity : AppCompatActivity() {
         judgeCard.addView(cardTitle("判断接口（Jev）"))
         judgeCard.addView(text("读对方消息、给意图判断和候选排序。必须配置。", 12f, sub))
 
-        val judgeBaseEdit = edit(prefs.judgeBaseUrl, Prefs.DEFAULT_JUDGE_BASE_KNOX)
-        val judgeModelEdit = edit(prefs.judgeModel, Prefs.DEFAULT_JUDGE_MODEL_KNOX)
+        judgeBaseEdit = edit(prefs.judgeBaseUrl, Prefs.DEFAULT_JUDGE_BASE_KNOX)
+        judgeModelEdit = edit(prefs.judgeModel, Prefs.DEFAULT_JUDGE_MODEL_KNOX)
         judgeProviderIdx = when (prefs.judgeProvider) {
             Prefs.PROVIDER_TYPESAFE -> 1
             Prefs.PROVIDER_OPENROUTER -> 2
@@ -182,8 +182,8 @@ class SettingsActivity : AppCompatActivity() {
         replyCard.addView(text("生成 3 条候选回复。任何 OpenAI 兼容地址，填到 /v1 为止。" +
             "注意：判断接口与回复接口是两家服务，密钥各不相同，都要填。", 12f, sub))
 
-        val replyBaseEdit = edit(prefs.replyBaseUrl, Prefs.TOKENRHYTHM_BASE)
-        val replyModelEdit = edit(prefs.replyModel, Prefs.TOKENRHYTHM_MODEL)
+        replyBaseEdit = edit(prefs.replyBaseUrl, Prefs.TOKENRHYTHM_BASE)
+        replyModelEdit = edit(prefs.replyModel, Prefs.TOKENRHYTHM_MODEL)
         val replyIdx = when (prefs.replyBaseUrl.trim().trimEnd('/')) {
             Prefs.TOKENRHYTHM_BASE -> 0
             Prefs.DEFAULT_REPLY_BASE -> 1
@@ -209,7 +209,7 @@ class SettingsActivity : AppCompatActivity() {
         // Declared before the buttons that write into it (both the model picker
         // and the connectivity test report through this one line).
         val replyResult = resultText()
-        val thinkRow = toggleRow("让模型先思考再回答（更准但更慢）", prefs.replyThinking)
+        thinkRow = toggleRow("让模型先思考再回答（更准但更慢）", prefs.replyThinking)
         replyCard.addView(thinkRow)
         replyCard.addView(text("实测同一提示词：关掉思考中位 4.5 秒，开着 7.3 秒。聊天回复一般不需要思考。",
             11f, sub))
@@ -262,8 +262,8 @@ class SettingsActivity : AppCompatActivity() {
         visionCard.addView(cardTitle("视觉接口（OCR 用，可不填）"))
         visionCard.addView(text("读不到控件树的 App 走截图识别。TokenRhythm 的 mimo-v2.6-flash 支持图片，留空即走它。", 12f, sub))
 
-        val visionBaseEdit = edit(prefs.visionBaseUrl, Prefs.TOKENRHYTHM_BASE)
-        val visionModelEdit = edit(prefs.visionModel, Prefs.TOKENRHYTHM_MODEL)
+        visionBaseEdit = edit(prefs.visionBaseUrl, Prefs.TOKENRHYTHM_BASE)
+        visionModelEdit = edit(prefs.visionModel, Prefs.TOKENRHYTHM_MODEL)
         val visionIdx = when (prefs.visionBaseUrl.trim().trimEnd('/')) {
             Prefs.TOKENRHYTHM_BASE -> 0
             Prefs.DEFAULT_VISION_BASE -> 1
@@ -340,42 +340,61 @@ class SettingsActivity : AppCompatActivity() {
         root.addView(section("分析"))
         val card2 = card()
         card2.addView(label("关系描述（给 Jev 判断用）"))
-        val relEdit = edit(prefs.relationship, Prefs.DEFAULT_REL)
+        relEdit = edit(prefs.relationship, Prefs.DEFAULT_REL)
         card2.addView(relEdit)
         card2.addView(label("会话白名单（每行一个关键词，空=所有会话）"))
-        val wlEdit = edit(prefs.whitelist.joinToString("\n"), "留空则对所有会话生效").apply {
+        wlEdit = edit(prefs.whitelist.joinToString("\n"), "留空则对所有会话生效").apply {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE; minLines = 2
         }
         card2.addView(wlEdit)
-        val autoRow = toggleRow("对方发消息时自动分析", prefs.autoAnalyze)
+        autoRow = toggleRow("对方发消息时自动分析", prefs.autoAnalyze)
         card2.addView(autoRow)
 
         // --- 群聊 ---
-        val groupRow = toggleRow("群聊模式", prefs.groupMode)
+        groupRow = toggleRow("群聊模式", prefs.groupMode)
         card2.addView(groupRow)
         card2.addView(text("开启后：保留发言人昵称、按「群里的人」而不是「对方」来判断，" +
             "候选回复也按群聊礼节生成（更短、不煽情、不乱用亲密称呼）。",
             11f, sub))
         card2.addView(label("只回复谁（群聊，留空=最后发言的人）"))
-        val groupTargetEdit = edit(prefs.groupTarget, "填群昵称，如：老王")
+        groupTargetEdit = edit(prefs.groupTarget, "填群昵称，如：老王")
         card2.addView(groupTargetEdit)
         card2.addView(text("填了之后，判断和候选回复都针对这个人；面板里他/她的发言会标 ▸。",
             11f, sub))
 
+        // --- 上下文窗口 ---
+        // These were hard-coded (10 for the model, 6 for the panel), which is why
+        // replies looked like they only answered the last line and the panel
+        // could never show more than six messages.
+        card2.addView(label("生成回复时看多少条消息（${Prefs.MIN_WINDOW}–${Prefs.MAX_WINDOW}）"))
+        replyWindowEdit = edit(prefs.replyWindow.toString(), Prefs.DEFAULT_WINDOW.toString()).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+        }
+        card2.addView(replyWindowEdit)
+        card2.addView(text("给回复模型的整段对话条数。越大越能接住上下文，但更慢、更贵。默认 ${Prefs.DEFAULT_WINDOW}。",
+            11f, sub))
+        card2.addView(label("判断对方意图时看多少条消息（${Prefs.MIN_WINDOW}–${Prefs.MAX_WINDOW}）"))
+        judgeWindowEdit = edit(prefs.judgeWindow.toString(), Prefs.DEFAULT_JUDGE_WINDOW.toString()).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+        }
+        card2.addView(judgeWindowEdit)
+        card2.addView(text("判断比回复需要更多上下文（意图取决于话题怎么走到这里），默认 ${Prefs.DEFAULT_JUDGE_WINDOW}。",
+            11f, sub))
+
         // --- OCR 兜底（B 阶段）---
-        val ocrFallbackRow = toggleRow("树读不到正文时用 OCR 兜底", prefs.ocrFallback)
+        ocrFallbackRow = toggleRow("树读不到正文时用 OCR 兜底", prefs.ocrFallback)
         card2.addView(ocrFallbackRow)
         card2.addView(text("飞书正文是画上去的、微信伪装失效时也读不到，这时截一次屏本地识别（不上传）。", 11f, sub))
-        val ocrAutoRow = toggleRow("OCR 模式自动分析", prefs.ocrAutoAnalyze)
+        ocrAutoRow = toggleRow("OCR 模式自动分析", prefs.ocrAutoAnalyze)
         card2.addView(ocrAutoRow)
         card2.addView(text("关闭时 OCR 认完只亮悬浮球，点一下再分析。", 11f, sub))
 
         // --- 知识库 / 关联上下文（D 阶段） ---
-        val ctxRow = toggleRow("记录聊天历史（只存本机，用于关联上下文）", prefs.contextEnabled)
+        ctxRow = toggleRow("记录聊天历史（只存本机，用于关联上下文）", prefs.contextEnabled)
         card2.addView(ctxRow)
         card2.addView(text("关闭时不写任何聊天内容到磁盘；笔记与联系人匹配仍然照常工作。", 11f, sub))
         card2.addView(label("注入最近历史条数（0–100）"))
-        val ctxCountEdit = edit(prefs.contextHistoryCount.toString(), "30").apply {
+        ctxCountEdit = edit(prefs.contextHistoryCount.toString(), "30").apply {
             inputType = InputType.TYPE_CLASS_NUMBER
         }
         card2.addView(ctxCountEdit)
@@ -419,7 +438,7 @@ class SettingsActivity : AppCompatActivity() {
         val opacityLabel = label("悬浮窗不透明度：${prefs.overlayOpacity}%")
         card3.addView(opacityLabel)
         card3.addView(text("越低越透，越能看清下面的聊天", 12f, sub))
-        val seek = SeekBar(this).apply {
+        seek = SeekBar(this).apply {
             max = 40; progress = prefs.overlayOpacity - 60  // 60..100
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(sb: SeekBar?, p: Int, u: Boolean) {
@@ -459,7 +478,12 @@ class SettingsActivity : AppCompatActivity() {
             12f, sub))
         val backupResult = resultText()
         backupResultView = backupResult
-        backupCard.addView(cardBtn("导出设置到文件") { exportConfig(backupResult) })
+        // Export applies the form FIRST (see exportConfig). The bug this fixes:
+        // the user types both API keys, scrolls down to this card (which sits
+        // ABOVE the 保存 button), taps 导出 — and the file captured whatever was
+        // last *saved*, i.e. no keys at all. Importing that file then restores
+        // nothing, which is exactly what was reported.
+        backupCard.addView(cardBtn("导出设置到文件（含当前输入框内容）") { exportConfig(backupResult) })
         backupCard.addView(cardBtn("从文件恢复设置") { importConfig(backupResult) })
         backupCard.addView(text(
             "注意：导出的文件里包含你的 API 密钥（明文），因为它就是用来免去重填的。" +
@@ -470,53 +494,95 @@ class SettingsActivity : AppCompatActivity() {
 
         // =================== 保存 ===================
         root.addView(primaryBtn("保存全部设置") {
-            // Address wins over the pill: a preset HOST in the box means that
-            // preset's provider (and so its path), whatever the pill last said.
-            val judgeBaseTyped = judgeBaseEdit.text.toString().trim()
-            val judgeProv = resolveJudgeProvider(judgeProviderIdx, judgeBaseTyped)
-            val judgeModelTyped = judgeModelEdit.text.toString().trim()
-            prefs.judgeProvider = judgeProv
-            // Blank falls back to THIS provider's preset — never OpenRouter's by
-            // default. Custom is left exactly as typed (blank included): guessing
-            // a URL for it would silently point somewhere the user did not choose.
-            prefs.judgeBaseUrl = when {
-                judgeBaseTyped.isNotBlank() -> judgeBaseTyped
-                judgeProv == Prefs.PROVIDER_CUSTOM -> ""
-                else -> defaultJudgeBase(judgeProv)
-            }
-            prefs.judgeKey = judgeKeyEdit.text.toString()
-            prefs.judgeModel = when {
-                judgeModelTyped.isNotBlank() -> judgeModelTyped
-                judgeProv == Prefs.PROVIDER_CUSTOM -> ""
-                else -> defaultJudgeModel(judgeProv)
-            }
-
-            prefs.replyBaseUrl = replyBaseEdit.text.toString().trim().ifBlank { Prefs.TOKENRHYTHM_BASE }
-            prefs.replyKey = replyKeyEdit.text.toString()
-            prefs.replyModel = replyModelEdit.text.toString().trim().ifBlank { Prefs.TOKENRHYTHM_MODEL }
-            prefs.replyThinking = (thinkRow.tag as? Boolean) ?: false
-            prefs.groupMode = (groupRow.tag as? Boolean) ?: true
-            prefs.groupTarget = groupTargetEdit.text.toString().trim()
-
-            prefs.visionBaseUrl = visionBaseEdit.text.toString().trim()
-            prefs.visionKey = visionKeyEdit.text.toString()
-            prefs.visionModel = visionModelEdit.text.toString().trim().ifBlank { Prefs.TOKENRHYTHM_MODEL }
-
-            prefs.relationship = relEdit.text.toString()   // blank stays blank, on purpose
-            prefs.whitelist = wlEdit.text.toString().split("\n")
-                .map { it.trim() }.filter { it.isNotEmpty() }.toSet()
-            prefs.autoAnalyze = (autoRow.tag as? Boolean) ?: true
-            prefs.ocrFallback = (ocrFallbackRow.tag as? Boolean) ?: true
-            prefs.ocrAutoAnalyze = (ocrAutoRow.tag as? Boolean) ?: false
-            prefs.contextEnabled = (ctxRow.tag as? Boolean) ?: false
-            prefs.contextHistoryCount =
-                ctxCountEdit.text.toString().trim().toIntOrNull()?.coerceIn(0, 100) ?: 30
-            prefs.overlayOpacity = seek.progress + 60
+            applyFormToPrefs()
             Toast.makeText(this, "已保存", Toast.LENGTH_SHORT).show()
         })
 
         setContentView(scroll)
     }
+
+    /**
+     * Write every field on this screen into [Prefs].
+     *
+     * Shared by the 保存 button and by export: export used to read only what was
+     * already saved, so typing a key and tapping 导出 before 保存 produced a
+     * backup with no key in it — the reported "导入后什么都没有" bug. Both paths
+     * now go through this one function, so they cannot drift apart.
+     *
+     * The field references are captured in locals by the caller (they are built
+     * in onCreate); this holds them as properties instead, since export can run
+     * from onActivityResult outside that scope.
+     */
+    private fun applyFormToPrefs() {
+        // Address wins over the pill: a preset HOST in the box means that
+        // preset's provider (and so its path), whatever the pill last said.
+        val judgeBaseTyped = judgeBaseEdit.text.toString().trim()
+        val judgeProv = resolveJudgeProvider(judgeProviderIdx, judgeBaseTyped)
+        val judgeModelTyped = judgeModelEdit.text.toString().trim()
+        prefs.judgeProvider = judgeProv
+        // Blank falls back to THIS provider's preset — never OpenRouter's by
+        // default. Custom is left exactly as typed (blank included): guessing
+        // a URL for it would silently point somewhere the user did not choose.
+        prefs.judgeBaseUrl = when {
+            judgeBaseTyped.isNotBlank() -> judgeBaseTyped
+            judgeProv == Prefs.PROVIDER_CUSTOM -> ""
+            else -> defaultJudgeBase(judgeProv)
+        }
+        prefs.judgeKey = judgeKeyEdit.text.toString()
+        prefs.judgeModel = when {
+            judgeModelTyped.isNotBlank() -> judgeModelTyped
+            judgeProv == Prefs.PROVIDER_CUSTOM -> ""
+            else -> defaultJudgeModel(judgeProv)
+        }
+
+        prefs.replyBaseUrl = replyBaseEdit.text.toString().trim().ifBlank { Prefs.TOKENRHYTHM_BASE }
+        prefs.replyKey = replyKeyEdit.text.toString()
+        prefs.replyModel = replyModelEdit.text.toString().trim().ifBlank { Prefs.TOKENRHYTHM_MODEL }
+        prefs.replyThinking = (thinkRow?.tag as? Boolean) ?: false
+
+        prefs.visionBaseUrl = visionBaseEdit.text.toString().trim()
+        prefs.visionKey = visionKeyEdit.text.toString()
+        prefs.visionModel = visionModelEdit.text.toString().trim().ifBlank { Prefs.TOKENRHYTHM_MODEL }
+
+        prefs.relationship = relEdit?.text?.toString() ?: prefs.relationship
+        prefs.whitelist = wlEdit?.text?.toString()?.split("\n")
+            ?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet() ?: prefs.whitelist
+        prefs.autoAnalyze = (autoRow?.tag as? Boolean) ?: true
+        prefs.ocrFallback = (ocrFallbackRow?.tag as? Boolean) ?: true
+        prefs.ocrAutoAnalyze = (ocrAutoRow?.tag as? Boolean) ?: false
+        prefs.contextEnabled = (ctxRow?.tag as? Boolean) ?: false
+        prefs.contextHistoryCount =
+            ctxCountEdit?.text?.toString()?.trim()?.toIntOrNull()?.coerceIn(0, 100) ?: 30
+        prefs.overlayOpacity = (seek?.progress ?: 32) + 60
+        // Chat windows (how much history the analysis sees).
+        prefs.replyWindow = replyWindowEdit?.text?.toString()?.trim()?.toIntOrNull()
+            ?.coerceIn(Prefs.MIN_WINDOW, Prefs.MAX_WINDOW) ?: prefs.replyWindow
+        prefs.judgeWindow = judgeWindowEdit?.text?.toString()?.trim()?.toIntOrNull()
+            ?.coerceIn(Prefs.MIN_WINDOW, Prefs.MAX_WINDOW) ?: prefs.judgeWindow
+        prefs.groupMode = (groupRow?.tag as? Boolean) ?: true
+        prefs.groupTarget = groupTargetEdit?.text?.toString()?.trim() ?: ""
+    }
+
+    // Fields the analyse/export paths need after onCreate has finished.
+    private lateinit var judgeBaseEdit: EditText
+    private lateinit var judgeModelEdit: EditText
+    private lateinit var replyBaseEdit: EditText
+    private lateinit var replyModelEdit: EditText
+    private lateinit var visionBaseEdit: EditText
+    private lateinit var visionModelEdit: EditText
+    private var relEdit: EditText? = null
+    private var wlEdit: EditText? = null
+    private var thinkRow: LinearLayout? = null
+    private var autoRow: LinearLayout? = null
+    private var ocrFallbackRow: LinearLayout? = null
+    private var ocrAutoRow: LinearLayout? = null
+    private var ctxRow: LinearLayout? = null
+    private var ctxCountEdit: EditText? = null
+    private var seek: SeekBar? = null
+    private var replyWindowEdit: EditText? = null
+    private var judgeWindowEdit: EditText? = null
+    private var groupRow: LinearLayout? = null
+    private var groupTargetEdit: EditText? = null
 
     // Held as fields because several test buttons read each other's key box.
     private lateinit var judgeKeyEdit: EditText
@@ -611,6 +677,11 @@ class SettingsActivity : AppCompatActivity() {
      */
     private fun exportConfig(out: TextView) {
         out.text = ""
+        // Apply what is on screen BEFORE reading prefs. Without this, a key typed
+        // but not yet saved is missing from the file and the backup turns out
+        // empty after a reinstall — the reported "导入后什么都没有" bug. Export
+        // means "save what I see, then write it out".
+        applyFormToPrefs()
         val name = ConfigBackup.suggestedName()
         val intent = android.content.Intent(android.content.Intent.ACTION_CREATE_DOCUMENT).apply {
             addCategory(android.content.Intent.CATEGORY_OPENABLE)
@@ -641,14 +712,22 @@ class SettingsActivity : AppCompatActivity() {
             REQ_EXPORT -> {
                 label.text = "已写入，正在导出…"
                 runCatching {
+                    val json = ConfigBackup.exportJson(prefs)
                     contentResolver.openOutputStream(uri)?.use { os ->
-                        os.write(ConfigBackup.exportJson(prefs).toByteArray(Charsets.UTF_8))
+                        os.write(json.toByteArray(Charsets.UTF_8))
                     } ?: throw IllegalStateException("无法写入所选文件")
-                    // Knowledge base rides along into a sibling folder next to
-                    // the config file, so context survives the reinstall too.
-                    val kb = ConfigBackup.copyKnowledgeBase(this, cacheDir.resolve("kbexport").apply { mkdirs() })
-                    "已导出：${prefs.judgeKey.isNotBlank() && prefs.replyKey.isNotBlank()}" +
-                        "含两个密钥" + if (kb > 0) "，另有知识库 $kb 个文件（未随配置写出）" else ""
+                    // Report what really went in, so an empty export is visible
+                    // immediately instead of being discovered after a reinstall.
+                    val nSettings = ConfigBackup.countSettings(json)
+                    val hasJudge = prefs.judgeKey.isNotBlank()
+                    val hasReply = prefs.replyKey.isNotBlank()
+                    val keyState = when {
+                        hasJudge && hasReply -> "含两个密钥"
+                        hasJudge -> "只含判断密钥（回复密钥是空的）"
+                        hasReply -> "只含回复密钥（判断密钥是空的）"
+                        else -> "注意：两个密钥都是空的，导出文件里没有密钥"
+                    }
+                    "已导出 $nSettings 项设置 · $keyState"
                 }.onSuccess { label.text = it }
                     .onFailure { label.text = "导出失败：${it.message ?: it.javaClass.simpleName}" }
             }
@@ -658,10 +737,14 @@ class SettingsActivity : AppCompatActivity() {
                     val text = contentResolver.openInputStream(uri)?.use { input ->
                         input.readBytes().toString(Charsets.UTF_8)
                     } ?: throw IllegalStateException("读不到所选文件")
-                    val msg = ConfigBackup.importJson(prefs, text)
-                    msg + "（返回上一页再进来即可看到新值）"
-                }.onSuccess { label.text = "已恢复：$it" }
-                    .onFailure { label.text = "恢复失败：${it.message ?: it.javaClass.simpleName}" }
+                    ConfigBackup.importJson(prefs, text)
+                }.onSuccess {
+                    // Rebuild the screen so the restored values are visible
+                    // immediately. Previously the boxes kept showing the old
+                    // (empty) text, so a successful import looked like a no-op.
+                    label.text = "已恢复：$it（正在刷新界面…）"
+                    recreate()
+                }.onFailure { label.text = "恢复失败：${it.message ?: it.javaClass.simpleName}" }
             }
         }
     }

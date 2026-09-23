@@ -97,12 +97,16 @@ class JudgeClient(private val prefs: Prefs) {
         val background = ctx?.background(relationship) ?: ""
         val history = ctx?.history ?: emptyList()
         val enriched = background.isNotBlank() || history.isNotEmpty()
+        // The window is a user setting (prefs.judgeWindow): judgment reads more
+        // of the thread than the draft does, because intent depends on how the
+        // conversation got here, not just on its last line.
+        val window = prefs.judgeWindow
         return try {
-            send(JevQuestions.buildState(snapshot, relationship, background, history), questions)
+            send(JevQuestions.buildState(snapshot, relationship, background, history, window), questions)
         } catch (e: ApiException) {
             if (enriched && e.status != null && e.status in 400..499) {
                 Log.w(TAG, "judge HTTP ${e.status} with background/history; retrying plain")
-                send(JevQuestions.buildState(snapshot, relationship), questions)
+                send(JevQuestions.buildState(snapshot, relationship, window = window), questions)
             } else throw e
         }
     }
