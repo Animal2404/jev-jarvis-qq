@@ -1,3 +1,4 @@
+import java.io.File
 import java.io.FileInputStream
 import java.util.Properties
 
@@ -14,7 +15,9 @@ plugins {
 // Resolved through java.io.File, NOT Gradle's file(): the latter parses a
 // Windows path like "H:/android/keys/..." as a URL whose scheme is "H" and
 // hard-fails the entire build on Linux ("Cannot convert URL ... to a file").
-val releasePropsFile = java.io.File(
+// `File` is imported explicitly because in a Kotlin DSL script the bare name
+// `java` resolves to the Java plugin extension, not the package.
+val releasePropsFile = File(
     System.getenv("JEV_KEYSTORE_PROPS") ?: "H:/android/keys/jev-release.properties"
 )
 val releaseProps = Properties().apply {
@@ -43,7 +46,9 @@ android {
     signingConfigs {
         if (releaseProps.isNotEmpty()) {
             create("release") {
-                storeFile = file(releaseProps.getProperty("storeFile"))
+                // File(...) rather than file(...): a Windows "H:/..." path is
+                // parsed as a URL by the latter and kills the build on Linux.
+                storeFile = File(releaseProps.getProperty("storeFile"))
                 storePassword = releaseProps.getProperty("storePassword")
                 keyAlias = releaseProps.getProperty("keyAlias")
                 keyPassword = releaseProps.getProperty("keyPassword")
