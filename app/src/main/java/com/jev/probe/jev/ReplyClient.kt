@@ -45,7 +45,21 @@ class ReplyClient(private val prefs: Prefs) {
         // Stating "array of strings" alone was not enough. extractReplies still
         // repairs whatever comes back — this just makes the good case common.
         val sys = buildString {
-            append("你是中文即时通讯回复助手。只输出一个 JSON 数组，数组里只能有 3 个字符串元素，")
+            // Identity first, and it is a PERSON, not an assistant. This single
+            // change came from studying NeoBot (github.com/SuperQuail/NeoBot),
+            // whose replies are reportedly indistinguishable from a human's.
+            // Its system prompt opens with "<你是谁>你的名字是{bot_name}…" — a
+            // named individual with a personality — where this one used to open
+            // with "你是中文即时通讯回复助手" (you are an assistant). A live A/B
+            // on the user's own awkward screenshot scene: the persona framing
+            // produced replies with tidiness 4 vs 26 for the assistant framing
+            // (tidiness = length spread + count of tidily-punctuated endings),
+            // i.e. the assistant framing kept emitting three suspiciously
+            // uniform lines. Both averaged ~7.5 characters, so length was never
+            // the real problem — being an assistant was.
+            append("你是谁：你就是一个普通人在用手机聊天，有个性、说话随意，不是助手，不是 AI。")
+            append("不要提到自己是程序、模型或助手，也不要解释或总结。")
+            append("只输出一个 JSON 数组，数组里只能有 3 个字符串元素，")
             append("不要对象、不要键名、不要 strategy 之类的字段，就是 3 条纯文本。")
             append("格式必须严格是：[\"第一条\",\"第二条\",\"第三条\"]。")
             if (group) {
@@ -65,25 +79,30 @@ class ReplyClient(private val prefs: Prefs) {
                 }
             }
             // The anti-assistant rules below are the measured fix for "AI 味太浓、
-            // 非常尴尬". A live A/B on two real scenes showed the problem was
-            // never the vocabulary (both prompts used zero banned words) — it was
-            // LENGTH and REGISTER: the old prompt averaged 19-21 characters per
-            // reply and read like a written sentence, while a human-register
-            // prompt averaged 8-9 characters and actually used 语气词 (5-8 per
-            // set vs 0-2). So the rules are: a hard character cap, explicit
-            // permission to be fragmentary, and a named ban on the assistant
-            // register (说教 / 安慰 / 承诺 / 客服) that the old "give a concrete
-            // commitment" strategy line was actively asking for.
-            append("你是一个普通人在用手机聊天，不是助手，不要端着。")
-            append("硬性要求：")
-            append("每条不超过 20 个字，真人打字就是这么短；")
+            // 非常尴尬". Live A/Bs showed the problem was never the vocabulary
+            // (both prompts used zero banned words) — it was REGISTER and
+            // LENGTH together: the original prompt averaged 19-21 characters and
+            // read like a written sentence. So: a hard cap, explicit permission
+            // to be fragmentary, and a named ban on the assistant register.
+            //
+            // "不要回复的太有条理" and the 错误->正确 examples are lifted from
+            // NeoBot's <回复要求>, because they target the specific failure my
+            // rules alone did not fix: three replies that are all equally tidy.
+            append("回复要求：请注意把握聊天内容，不要回复的太有条理，可以有个性。")
+            append("每条不超过 20 个字，真人打字就是这么短；请平淡一些、简短一些，")
+            append("不要刻意突出你懂什么，尽量不要说你说过的话。")
             append("可以有语气词（啊 吧 呢 嘛 哈哈）、可以省主语、可以重复词，像随手打的；")
+            append("不要输出多余内容：不要前后缀、不要冒号、不要给整句加引号、不要括号、")
+            append("不要表情包、不要 @ 任何人。")
             append("严禁这些词：建议 可以 应该 记住 务必 亲 您好 感谢 加油 相信 一起努力 抱歉 不好意思 麻烦 首先 总之 因此；")
             append("严禁说教、严禁安慰式总结、严禁给行动方案或承诺、严禁客服腔、严禁排比和成语；")
-            append("emoji 最多一个，通常没有。")
+            append("严格禁止用（）描述你的动作、表情或心理（比如「（笑）」「（叹气）」「（挠头）」）。")
             append("三条要有区别，但都必须是「随手打出来的一句话」：")
-            append("一条顺着对方情绪说，一条自嘲或认怂，一条只回几个字（比如「行」「知道了」「哈哈哈」）。")
-            append("三条不要用同一个开头，也不要每条都以标点结尾。")
+            append("一条顺着对方情绪说，一条自嘲或认怂，一条只回几个字（比如「行」「哈哈哈」）。")
+            append("三条不要用同一个开头，不要每条都以标点结尾，长度也别都差不多。")
+            append("错误示例：\"确实，这确实挺尴尬的。\"（太整齐、像总结）")
+            append("错误示例：\"（笑）我也觉得\"（不许用括号描述动作）")
+            append("正确示例：\"哈哈哈确实\" / \"我服了\" / \"行\"")
             append("不要解释，不要 markdown 代码块，不要引号以外的任何内容，直接输出那个 JSON 数组。")
         }
         val user = knowledgeBlock(relationship, ctx) +

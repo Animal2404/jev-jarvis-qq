@@ -308,23 +308,40 @@ class QQAdapter : ChatAppAdapter {
 
         val avatarEdge = (width * 0.13).toInt()
         bubbles.sortBy { it.top }
-        // Attach each nickname to the nearest bubble starting below it.
+        // Attach each nickname to the NEAREST one above its bubble. The window is
+        // 200px (~73dp) and tolerates a slightly negative offset, because the
+        // tree's rounded bounds can put a nickname a few px below its bubble's
+        // top — the old `nick.top <= bubble.top` test then dropped it entirely,
+        // which is one way a group ends up with no speaker names at all (the
+        // panel showed every line as 对方). Widening is safe: the nearest
+        // candidate still wins, so a nickname from a previous row (further away)
+        // is not picked up.
         val withSpeaker = bubbles.map { b ->
             val nick = nicknames
-                .filter { it.top <= b.top && b.top - it.top < 120 }
-                .minByOrNull { b.top - it.top }
+                .filter { b.top - it.top in NICK_WINDOW_MIN..NICK_WINDOW_MAX }
+                .minByOrNull { kotlin.math.abs(b.top - it.top) }
             b.copy(speaker = nick?.text)
         }
+        // Where a bubble sits when pinned to its own side. The old rule compared
+        // edges against the AVATAR COLUMN, but a bubble starts ~one avatar-width
+        // further in, so a correctly-pinned bubble still showed a ~110px
+        // "distance" while the opposite edge could beat it. That mislabeled long
+        // messages in both directions (reported: 唐天's long line shown as 我).
+        // Comparing against the bubble's own anchor makes the pinned edge match
+        // at ~0 for any message length.
+        val avatarW = (width * 0.092f).toInt()   // avatar is ~40dp at 1200px
+        val leftAnchor = avatarEdge + avatarW
+        val rightAnchor = (width - avatarEdge) - avatarW
         val msgs = withSpeaker.map { b ->
-            val dl = kotlin.math.abs(b.left - avatarEdge)
-            val dr = kotlin.math.abs((width - avatarEdge) - b.right)
+            val dl = kotlin.math.abs(b.left - leftAnchor)
+            val dr = kotlin.math.abs(b.right - rightAnchor)
             val mine = dr < dl
             Msg(if (mine) "me" else "other", b.text, if (mine) null else b.speaker)
         }
-        // A nickname appearing on someone else's bubble is what proves this is a
-        // group; with no nicknames at all it is treated as 1:1 (QQ shows none
-        // in a private chat).
-        val group = withSpeaker.any { it.speaker != null }
+        // A nickname on someone else's bubble is what proves this is a group;
+        // with no nicknames at all it is treated as 1:1 (QQ shows none in a
+        // private chat).
+        val group = msgs.any { it.side == "other" && !it.speaker.isNullOrBlank() }
         return ChatSnapshot(title, msgs, isGroup = group)
     }
 
@@ -344,6 +361,10 @@ class QQAdapter : ChatAppAdapter {
         private const val NICKNAME_ID = "com.tencent.mobileqq:id/mjq"
         private const val TITLE_ID = "com.tencent.mobileqq:id/371"
         private const val INPUT_ID = "com.tencent.mobileqq:id/input"
+
+        /** How far above a bubble its nickname may sit (px). See the attach site. */
+        private const val NICK_WINDOW_MIN = -24
+        private const val NICK_WINDOW_MAX = 200
     }
 }
 

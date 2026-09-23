@@ -58,24 +58,38 @@ object JevQuestions {
             " \"$s\" — read that member's own messages, not the room's mood in general."
     }
 
-    private fun noul(instructions: String, t: String, f: String, note: String = BACKGROUND_NOTE) =
+    /**
+     * The trailing note appended to every question in the CURRENT judge() call.
+     *
+     * Held as a field and set once at the top of [judge], rather than passed as
+     * a parameter to each of the 7 helpers: threading it through every call site
+     * is what broke the previous attempt (a mis-placed `, note` turned into a
+     * third argument to `put(...)`, which takes two, and the whole file failed
+     * to compile). One assignment cannot go wrong seven ways.
+     *
+     * [judge] is the only caller and it always sets this before building any
+     * question, so the default here is only a safety net.
+     */
+    private var activeNote: String = BACKGROUND_NOTE
+
+    private fun noul(instructions: String, t: String, f: String) =
         JSONObject().apply {
             put("type", "noul")
-            put("instructions", instructions + note)
+            put("instructions", instructions + activeNote)
             put("criteria", JSONObject().put("true", t).put("false", f))
         }
 
-    private fun choice(instructions: String, criteria: Map<String, String>, note: String = BACKGROUND_NOTE) =
+    private fun choice(instructions: String, criteria: Map<String, String>) =
         JSONObject().apply {
             put("type", "choice")
-            put("instructions", instructions + note)
+            put("instructions", instructions + activeNote)
             put("criteria", JSONObject().also { c -> criteria.forEach { (k, v) -> c.put(k, v) } })
         }
 
-    private fun score(instructions: String, levels: List<String>, note: String = BACKGROUND_NOTE) =
+    private fun score(instructions: String, levels: List<String>) =
         JSONObject().apply {
             put("type", "score")
-            put("instructions", instructions + note)
+            put("instructions", instructions + activeNote)
             put("criteria", JSONArray().also { a -> levels.forEach { a.put(it) } })
         }
 
@@ -84,8 +98,10 @@ object JevQuestions {
      * @param group read the room as multi-party (see [GROUP_NOTE]).
      * @param focusSpeaker in a group, the nickname this judgment is about
      *        (blank = whoever sent the latest message). */
-    fun judge(group: Boolean = false, focusSpeaker: String? = null): JSONObject = JSONObject().apply {
-        val note = noteFor(group) + focusNote(focusSpeaker)
+    fun judge(group: Boolean = false, focusSpeaker: String? = null): JSONObject {
+        // Set before any question is built; every helper reads it.
+        activeNote = noteFor(group) + focusNote(focusSpeaker)
+        return JSONObject().apply {
         put("literal_question", noul(
             "Is the other person's latest message meant purely literally, with no subtext? " +
                 "Judge from the whole thread, not one sentence in isolation.",
@@ -94,7 +110,7 @@ object JevQuestions {
             "There is subtext: a test of whether you remember or care, sarcasm, " +
                 "an implied complaint, a hint they will not say outright, a trap question, " +
                 "an accusation dressed as a question, or a cold/short line that really means blame."
-        ), note)
+        ))
         put("true_intent", choice(
             "What is the other person's true intent in the latest message, given the full conversation? " +
                 "Prefer tone and context over surface wording. " +
@@ -120,7 +136,7 @@ object JevQuestions {
                     "or clearly signaled they need nothing more. " +
                     "Not a breakup, not 'don't contact me', not sarcastic 'I'm used to it'.")
             )
-        ), note)
+        ))
         put("danger_level", score(
             "How close is this conversation to a fight or to hurting the relationship? " +
                 "Match the current scene. " +
@@ -142,7 +158,7 @@ object JevQuestions {
                     "break up if you forget again, report you tonight, or stop working together if you miss this.",
                 "Active rupture: they said it is over, told you not to reply, deleted you, or are exploding."
             )
-        ), note)
+        ))
         put("should_reply_now", noul(
             "Should your next message contain substantive content? " +
                 "Substantive means: admitting a specific known fault, giving a concrete time/plan/deliverable, " +
@@ -157,7 +173,7 @@ object JevQuestions {
             "Do not put substance in the next message: the recalled content is not in this snippet, " +
                 "they are testing whether you remember, a holding line is enough, " +
                 "saying less is safer, or they already closed the topic."
-        ), note)
+        ))
         put("best_action", choice(
             "What type of next action is best? Do not decide whether to send a message immediately. " +
                 "Ignore timing. Choose only the action type. " +
@@ -178,7 +194,7 @@ object JevQuestions {
                 "make_plan" to ("Propose or confirm logistics (time, place, task) for a non-conflict request " +
                     "such as a meal or a meeting.")
             )
-        ), note)
+        ))
         put("she_needs", choice(
             "What does the other person need from you right now? Judge the LATEST message first. " +
                 "If they genuinely accepted (thanks / got it / 没事了 / 那就这样 / 收到了 / 过去了), " +
@@ -198,7 +214,7 @@ object JevQuestions {
                     "warm casual chat with no ask, or a rupture where they told you not to reply. " +
                     "Not sarcasm pretending to be fine.")
             )
-        ), note)
+        ))
         put("tension_resolved", noul(
             "Has interpersonal tension already been resolved? " +
                 "Answer true only if there was never tension, or the other person has clearly accepted, " +
@@ -208,7 +224,8 @@ object JevQuestions {
                 "confirmed a happy plan, or the chat was never tense.",
             "Tension is still present: they are waiting, testing, angry, sarcastic, " +
                 "issuing an ultimatum, or the issue is open."
-        ), note)
+        ))
+        }
     }
 
     /**
